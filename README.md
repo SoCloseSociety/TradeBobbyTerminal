@@ -210,7 +210,7 @@ graph LR
 ### Install
 
 ```bash
-git clone https://github.com/SoCloseSociety/TradeBobby.git
+git clone https://github.com/SoCloseSociety/TradeBobbyTerminal.git
 cd TradeBobby
 npm install --prefix dashboard
 
@@ -526,6 +526,6 @@ This is research software. **Use at your own risk.** Past performance does not g
 
 Made for the trader who wants Bloomberg density without the $25k/year terminal.
 
-[⭐ Star this repo](https://github.com/SoCloseSociety/TradeBobby) · [🐛 Report a bug](https://github.com/SoCloseSociety/TradeBobby/issues) · [💬 Discussions](https://github.com/SoCloseSociety/TradeBobby/discussions)
+[⭐ Star this repo](https://github.com/SoCloseSociety/TradeBobbyTerminal) · [🐛 Report a bug](https://github.com/SoCloseSociety/TradeBobbyTerminal/issues) · [💬 Discussions](https://github.com/SoCloseSociety/TradeBobbyTerminal/discussions)
 
 </div>
