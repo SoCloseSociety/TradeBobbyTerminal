@@ -1,0 +1,56 @@
+{
+  "last_updated": "YYYY-MM-DD",
+  "geopolitical": {
+    "wars": [
+      {
+        "name": "EXAMPLE: War name",
+        "status": "ongoing",
+        "impact": "oil/gas supply",
+        "bias": {
+          "XAUUSD": "LONG",
+          "USOIL": "LONG"
+        }
+      }
+    ],
+    "trade_wars": [
+      {
+        "name": "EXAMPLE: Trade dispute",
+        "status": "10% tariff",
+        "impact": "USD volatility",
+        "bias": {
+          "EURUSD": "LONG"
+        }
+      }
+    ],
+    "sanctions": [
+      {
+        "name": "EXAMPLE: sanction regime",
+        "status": "active",
+        "impact": "supply constraint"
+      }
+    ]
+  },
+  "institutional": {
+    "gold": {
+      "bias": "EXAMPLE: LONG on dips",
+      "central_bank_buying": "expected tonnes/year"
+    },
+    "silver": {
+      "bias": "EXAMPLE: BULLISH long-term",
+      "comex_status": "inventory state"
+    },
+    "oil": {
+      "bias": "EXAMPLE: follows geopolitics, not TA"
+    }
+  },
+  "macro_rules": {
+    "gold_max_short_duration": "scalp only",
+    "silver_primary_bias": "LONG on pullbacks",
+    "oil_trade_on": "news/sanctions, not charts"
+  },
+  "priority_alerts": [
+    "EXAMPLE: COMEX delivery stress watch",
+    "EXAMPLE: Fed rate decision impact",
+    "EXAMPLE: Central bank gold purchase reports"
+  ]
+}

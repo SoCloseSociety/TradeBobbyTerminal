@@ -1,0 +1,1931 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TradeBobby
+
+//@version=5
+indicator("Pro Trading V6 - ICT/SMC + MACRO", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ──── STRUCTURE ────
+grpStruct      = "STRUCTURE"
+swingLen       = input.int(5, "Swing Lookback", minval=2, maxval=20, group=grpStruct)
+showStructure  = input.bool(true, "Show Structure Labels (HH/HL/LH/LL)", group=grpStruct)
+showBOS        = input.bool(true, "Show BOS Labels", group=grpStruct)
+showCHoCH      = input.bool(true, "Show CHoCH Labels", group=grpStruct)
+showStructLine = input.bool(true, "Show Structure Lines", group=grpStruct)
+colBullStruct  = input.color(color.new(#00E676, 0), "Bullish Structure Color", group=grpStruct)
+colBearStruct  = input.color(color.new(#FF5252, 0), "Bearish Structure Color", group=grpStruct)
+
+// ──── ORDER BLOCKS ────
+grpOB          = "ORDER BLOCKS"
+showOB         = input.bool(true, "Show Order Blocks", group=grpOB)
+obExtend       = input.int(50, "OB Extension (bars)", minval=10, maxval=200, group=grpOB)
+obMaxCount     = input.int(10, "Max OBs Stored", minval=1, maxval=20, group=grpOB)
+obDisplacement = input.float(1.5, "Displacement Multiplier (x ATR)", minval=0.5, maxval=5.0, step=0.1, group=grpOB, tooltip="OB only valid if followed by an impulse candle > this * ATR")
+colBullOB      = input.color(color.new(#00E676, 82), "Bullish OB Color", group=grpOB)
+colBearOB      = input.color(color.new(#FF5252, 82), "Bearish OB Color", group=grpOB)
+colMitOB       = input.color(color.new(#616161, 92), "Mitigated OB Color", group=grpOB)
+
+// ──── FVG ────
+grpFVG         = "FAIR VALUE GAPS"
+showFVG        = input.bool(true, "Show FVGs", group=grpFVG)
+fvgMinPct      = input.float(0.3, "Min FVG Size (% of price)", minval=0.0, step=0.1, group=grpFVG)
+fvgExtend      = input.int(30, "FVG Extension (bars)", minval=5, maxval=100, group=grpFVG)
+showCE         = input.bool(true, "Show CE (50%) Line", group=grpFVG)
+fvgMaxCount    = input.int(10, "Max FVGs Stored", minval=1, maxval=20, group=grpFVG)
+colBullFVG     = input.color(color.new(#26A69A, 85), "Bullish FVG Color", group=grpFVG)
+colBearFVG     = input.color(color.new(#EF5350, 85), "Bearish FVG Color", group=grpFVG)
+colMitFVG      = input.color(color.new(#616161, 93), "Mitigated FVG Color", group=grpFVG)
+colCE          = input.color(color.new(#FFFFFF, 50), "CE Line Color", group=grpFVG)
+
+// ──── LIQUIDITY ────
+grpLiq         = "LIQUIDITY"
+showLiquidity  = input.bool(true, "Show Liquidity Levels", group=grpLiq)
+liqTolerance   = input.float(0.3, "Equal H/L Tolerance (%)", minval=0.01, step=0.05, group=grpLiq)
+showSweeps     = input.bool(true, "Show Liquidity Sweeps", group=grpLiq)
+colLiq         = input.color(color.new(#FF9800, 30), "Liquidity Color", group=grpLiq)
+
+// ──── KEY LEVELS ────
+grpLevels      = "KEY LEVELS"
+showPDHL       = input.bool(true, "Show Previous Day High/Low/Close", group=grpLevels)
+showPWHL       = input.bool(true, "Show Previous Week High/Low", group=grpLevels)
+showNYMO       = input.bool(true, "Show NY Midnight Open", group=grpLevels)
+showAsianRange = input.bool(true, "Show Asian Session Range", group=grpLevels)
+colPDH         = input.color(color.new(#FF9800, 30), "PDH Color", group=grpLevels)
+colPDL         = input.color(color.new(#2196F3, 30), "PDL Color", group=grpLevels)
+colPDC         = input.color(color.new(#9E9E9E, 40), "PDC Color", group=grpLevels)
+colPWHL        = input.color(color.new(#E040FB, 40), "PWH/PWL Color", group=grpLevels)
+colNYMO        = input.color(color.new(#00BCD4, 30), "NY Midnight Open Color", group=grpLevels)
+colAsianH      = input.color(color.new(#FFEB3B, 50), "Asian High Color", group=grpLevels)
+colAsianL      = input.color(color.new(#FFEB3B, 50), "Asian Low Color", group=grpLevels)
+
+// ──── PREMIUM / DISCOUNT ────
+grpPD          = "PREMIUM / DISCOUNT"
+showPremDisc   = input.bool(true, "Show Premium/Discount Zone", group=grpPD)
+pdLookback     = input.int(50, "Range Lookback", minval=10, maxval=200, group=grpPD)
+
+// ──── SESSIONS ────
+grpSess        = "SESSIONS (UTC+7)"
+showSessions   = input.bool(true, "Show Session Backgrounds", group=grpSess)
+showKZ         = input.bool(true, "Highlight Killzone", group=grpSess)
+showSessOpen   = input.bool(true, "Show Session Open Labels", group=grpSess)
+colAsia        = input.color(color.new(#FFEB3B, 96), "Asia Session Color", group=grpSess)
+colLondon      = input.color(color.new(#2196F3, 96), "London Session Color", group=grpSess)
+colNY          = input.color(color.new(#9C27B0, 96), "New York Session Color", group=grpSess)
+colKZ          = input.color(color.new(#FF9800, 92), "Killzone Color", group=grpSess)
+
+// ──── HTF BIAS ────
+grpHTF         = "HTF BIAS"
+showHTF        = input.bool(true, "Show HTF Bias", group=grpHTF)
+htfTF          = input.timeframe("D", "HTF Timeframe", group=grpHTF)
+htfEmaFast     = input.int(20, "HTF EMA Fast", group=grpHTF)
+htfEmaMid      = input.int(50, "HTF EMA Mid", group=grpHTF)
+htfEmaSlow     = input.int(200, "HTF EMA Slow", group=grpHTF)
+
+// ──── CONFLUENCE ────
+grpConf        = "CONFLUENCE ENGINE"
+minConfluence  = input.int(4, "Min Confluence for Signal", minval=1, maxval=10, group=grpConf)
+volMultiplier  = input.float(1.5, "Volume Multiplier", minval=1.0, step=0.1, group=grpConf)
+volLen         = input.int(20, "Volume MA Length", minval=5, group=grpConf)
+
+// ──── SIGNALS ────
+grpSig         = "ENTRY SIGNALS"
+showSignals    = input.bool(true, "Show Entry Signals", group=grpSig)
+obProximityPct = input.float(1.0, "OB/FVG Proximity (%)", minval=0.1, step=0.1, group=grpSig)
+sigCooldown    = input.int(5, "Signal Cooldown (bars)", minval=1, maxval=50, group=grpSig)
+maxSLAtr       = input.float(3.0, "Max SL Distance (x ATR)", minval=1.0, maxval=10.0, step=0.5, group=grpSig, tooltip="Reject signals where SL is further than this * ATR")
+blockCounterZone = input.bool(true, "Block counter-zone signals", group=grpSig, tooltip="Block LONG in premium / SHORT in discount")
+
+// ──── RISK/REWARD ────
+grpRR          = "RISK / REWARD"
+showRR         = input.bool(true, "Show SL/TP Lines", group=grpRR)
+rrRatio        = input.float(2.0, "R:R Multiplier", minval=1.0, step=0.5, group=grpRR)
+minRR          = input.float(2.0, "Min R:R to Show Signal", minval=1.0, step=0.5, group=grpRR)
+accountSize    = input.float(10000.0, "Account Size ($)", minval=100, step=100, group=grpRR)
+riskPct        = input.float(1.0, "Risk per trade (%)", minval=0.1, maxval=10, step=0.1, group=grpRR)
+
+// ──── MACRO VISUALS ────
+grpMacro       = "MACRO VISUALS"
+showRoundNums  = input.bool(true, "Show Round Number Levels", group=grpMacro)
+showPMHL       = input.bool(true, "Show Previous Month H/L", group=grpMacro)
+showVolBars    = input.bool(true, "Color Volume Bars", group=grpMacro)
+showStackZone  = input.bool(true, "Show Stack OK/NO Zone", group=grpMacro)
+colPMHL        = input.color(color.new(#00BCD4, 40), "Prev Month H/L Color", group=grpMacro)
+
+// ──── DASHBOARD ────
+grpDash        = "DASHBOARD"
+showDashboard  = input.bool(true, "Show Dashboard", group=grpDash)
+
+// ──── V6 — VIX RISK FILTER ────
+grpVix         = "V6 · VIX RISK FILTER"
+useVixFilter   = input.bool(true, "Use VIX Risk-Off Filter", group=grpVix, tooltip="Tint background when VIX > threshold; optionally block trade signals")
+vixThreshold   = input.float(22.0, "VIX Threshold (stress)", minval=15, maxval=40, step=0.5, group=grpVix)
+blockTradesHighVix = input.bool(false, "Block Long Signals when VIX > threshold", group=grpVix, tooltip="If ON, long signals are suppressed during VIX stress (risk-off)")
+colVixStress   = input.color(color.new(#FF5252, 95), "VIX Stress BG Color", group=grpVix)
+
+// ──── V6 — ANCHORED VWAP ────
+grpVwap        = "V6 · ANCHORED VWAP"
+showVwapDaily  = input.bool(true, "Show Daily VWAP", group=grpVwap)
+showVwapWeekly = input.bool(true, "Show Weekly VWAP", group=grpVwap)
+showVwapBands  = input.bool(false, "Show VWAP Standard Deviation Bands", group=grpVwap)
+colVwapDaily   = input.color(color.new(#FF9800, 0), "Daily VWAP Color", group=grpVwap)
+colVwapWeekly  = input.color(color.new(#E040FB, 0), "Weekly VWAP Color", group=grpVwap)
+colVwapBand    = input.color(color.new(#FF9800, 70), "VWAP Bands Color", group=grpVwap)
+
+// ──── V6 — KILLZONE BACKGROUND ────
+grpKZ          = "V6 · KILLZONE VISUAL"
+showKZ         = input.bool(true, "Highlight Killzones Background", group=grpKZ)
+showAsianKZ    = input.bool(false, "Asian (03-07 UTC+7)", group=grpKZ)
+showLondonKZ   = input.bool(true, "London KZ (14-18 UTC+7)", group=grpKZ)
+showNYOpenKZ   = input.bool(true, "NY Open (19-22 UTC+7) — PRIME", group=grpKZ)
+colLondonKZ    = input.color(color.new(#2196F3, 92), "London KZ Color", group=grpKZ)
+colNYKZ        = input.color(color.new(#00E676, 90), "NY KZ Color", group=grpKZ)
+colAsianKZ     = input.color(color.new(#FFEB3B, 95), "Asian KZ Color", group=grpKZ)
+
+// ──── V6 — BREAKER BLOCKS ────
+grpBreaker     = "V6 · BREAKER BLOCKS"
+showBreaker    = input.bool(true, "Show Breaker Blocks", group=grpBreaker, tooltip="When an OB is broken in opposite direction, it becomes a breaker block (S/R reversal zone)")
+breakerExtend  = input.int(40, "Breaker Extension (bars)", minval=10, maxval=150, group=grpBreaker)
+colBullBreaker = input.color(color.new(#26C6DA, 80), "Bullish Breaker Color", group=grpBreaker)
+colBearBreaker = input.color(color.new(#EC407A, 80), "Bearish Breaker Color", group=grpBreaker)
+
+// ──── V6 — INVERSE FVG (IFVG) ────
+grpIFVG        = "V6 · INVERSE FVG"
+showIFVG       = input.bool(true, "Show Inverse FVGs", group=grpIFVG, tooltip="When a FVG is fully closed through, it inverts: bullish FVG → bearish resistance, vice versa")
+ifvgExtend     = input.int(30, "IFVG Extension (bars)", minval=10, maxval=100, group=grpIFVG)
+colBullIFVG    = input.color(color.new(#7C4DFF, 80), "Bullish IFVG Color", group=grpIFVG)
+colBearIFVG    = input.color(color.new(#FF6F00, 80), "Bearish IFVG Color", group=grpIFVG)
+
+// ──── V6 — MULTI-TIMEFRAME BIAS ────
+grpMTF         = "V6 · MULTI-TF BIAS"
+useMTFBias     = input.bool(true, "Use Multi-Timeframe Bias", group=grpMTF, tooltip="Composite bias from Daily + 4H + 1H EMA alignment")
+mtfEmaFast     = input.int(20, "MTF EMA Fast", minval=5, maxval=50, group=grpMTF)
+mtfEmaSlow     = input.int(50, "MTF EMA Slow", minval=20, maxval=200, group=grpMTF)
+showMTFRow     = input.bool(true, "Show MTF Bias Row in Dashboard", group=grpMTF)
+
+// ──── V6 — OTE FROM LAST SWING ────
+grpOTE         = "V6 · OTE (SWING)"
+showOTESwing   = input.bool(true, "Show OTE Zone (last swing)", group=grpOTE, tooltip="Auto-draws Fib 0.62-0.79 retracement from last confirmed swing")
+oteFibLow      = input.float(0.62, "OTE Lower Fib", minval=0.5, maxval=0.79, step=0.01, group=grpOTE)
+oteFibHigh     = input.float(0.79, "OTE Upper Fib", minval=0.62, maxval=0.99, step=0.01, group=grpOTE)
+colOTESwing    = input.color(color.new(#FFEB3B, 80), "OTE Swing Color", group=grpOTE)
+
+// ──── V6 — NEWS BLACKOUT FILTER ────
+grpNews        = "V6 · NEWS BLACKOUT"
+useNewsBlack   = input.bool(false, "Block signals around high-impact events", group=grpNews, tooltip="Suppress entry signals N minutes before/after specified event times (UTC). Useful for NFP, CPI, FOMC.")
+newsBlackoutWindow = input.int(30, "Blackout window (min, ±)", minval=5, maxval=120, group=grpNews)
+newsTime1      = input.string("1330", "Event time 1 (HHMM UTC)", tooltip="Most US data 13:30 UTC (NFP/CPI/Jobless)", group=grpNews)
+newsTime2      = input.string("1900", "Event time 2 (HHMM UTC)", tooltip="FOMC press conference typically 19:00 UTC", group=grpNews)
+newsTime3      = input.string("1215", "Event time 3 (HHMM UTC)", tooltip="ECB rate decisions 12:15 UTC", group=grpNews)
+showBlackoutBG = input.bool(true, "Highlight blackout windows", group=grpNews)
+colBlackoutBG  = input.color(color.new(#9E9E9E, 90), "Blackout BG Color", group=grpNews)
+
+// ──── V6 — POWER OF 3 (AMD) ────
+grpP3          = "V6 · POWER OF 3 (AMD)"
+showP3         = input.bool(true, "Show Power of 3 Phase Label", group=grpP3, tooltip="Tracks Accumulation (Asia) / Manipulation (London) / Distribution (NY) phases")
+
+// ──── V6 — HTF FVG (4H + Daily projected) ────
+grpHFVG        = "V6 · HTF FVG"
+showHTF4H_FVG  = input.bool(true, "Show 4H FVGs on current chart", group=grpHFVG)
+showHTFD_FVG   = input.bool(true, "Show Daily FVGs on current chart", group=grpHFVG)
+htfFvgExtend   = input.int(60, "HTF FVG Extension (bars)", minval=20, maxval=200, group=grpHFVG)
+colHTF4H_FVG_B = input.color(color.new(#00BFA5, 75), "4H Bull FVG", group=grpHFVG)
+colHTF4H_FVG_S = input.color(color.new(#FF5252, 75), "4H Bear FVG", group=grpHFVG)
+colHTFD_FVG_B  = input.color(color.new(#1DE9B6, 60), "Daily Bull FVG", group=grpHFVG)
+colHTFD_FVG_S  = input.color(color.new(#FF1744, 60), "Daily Bear FVG", group=grpHFVG)
+
+// ──── V6 — LIQUIDITY VOIDS ────
+grpVoid        = "V6 · LIQUIDITY VOIDS"
+showVoid       = input.bool(true, "Show Liquidity Voids", group=grpVoid, tooltip="Detects extreme imbalance candles (range > N × ATR) — price moves fast through, expect retrace")
+voidAtrMult    = input.float(2.5, "Void ATR Multiplier", minval=1.5, maxval=5.0, step=0.1, group=grpVoid)
+voidExtend     = input.int(40, "Void Extension (bars)", minval=10, maxval=150, group=grpVoid)
+colBullVoid    = input.color(color.new(#80DEEA, 75), "Bullish Void", group=grpVoid)
+colBearVoid    = input.color(color.new(#FFAB91, 75), "Bearish Void", group=grpVoid)
+
+// ──── V6 — MITIGATION BLOCKS ────
+grpMit         = "V6 · MITIGATION BLOCKS"
+showMit        = input.bool(true, "Show Mitigation Blocks", group=grpMit, tooltip="Origin point of clean impulse moves — price often retraces to mitigate before continuing")
+mitExtend      = input.int(50, "Mitigation Extension (bars)", minval=10, maxval=200, group=grpMit)
+mitMinImpulse  = input.float(2.0, "Min Impulse Size (× ATR)", minval=1.0, maxval=5.0, step=0.1, group=grpMit)
+colBullMit     = input.color(color.new(#AB47BC, 85), "Bullish Mitigation", group=grpMit)
+colBearMit     = input.color(color.new(#FFA726, 85), "Bearish Mitigation", group=grpMit)
+
+// ──── V6 — STACKED CONFLUENCE ZONES ────
+grpStack       = "V6 · STACKED CONFLUENCE"
+showStackZones = input.bool(true, "Highlight Stacked Confluence Zones", group=grpStack, tooltip="When 3+ V5/V6 structures (OB/FVG/Breaker/IFVG/Mitigation) overlap in price")
+stackMinCount  = input.int(3, "Min Structures to Highlight", minval=2, maxval=5, group=grpStack)
+colStackZone   = input.color(color.new(#FFD600, 70), "Stack Zone Color", group=grpStack)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMMON CALCULATIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+atrVal  = ta.atr(14)
+volMA   = ta.sma(volume, volLen)
+highVol = volume > volMA * volMultiplier
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MARKET STRUCTURE ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow  = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH     = na
+var int   lastSHBar  = na
+var float lastSL     = na
+var int   lastSLBar  = na
+var float prevSH     = na
+var int   prevSHBar  = na
+var float prevSL     = na
+var int   prevSLBar  = na
+
+var int trend = 0  // 1=bullish, -1=bearish, 0=undefined
+
+var bool bosUp   = false
+var bool bosDn   = false
+var bool chochUp = false
+var bool chochDn = false
+
+// Reset per-bar flags
+bosUp   := false
+bosDn   := false
+chochUp := false
+chochDn := false
+
+// Track structure type for labels
+var string lastHighType = ""
+var string lastLowType  = ""
+
+// Track if BOS already fired for current swing level (prevent repeated triggers)
+var bool bosUpFired = false
+var bool bosDnFired = false
+
+// ── Swing High detected ──
+if not na(swingHigh)
+    prevSH    := lastSH
+    prevSHBar := lastSHBar
+    lastSH    := swingHigh
+    lastSHBar := bar_index - swingLen
+    bosUpFired := false
+
+    if not na(prevSH)
+        lastHighType := swingHigh > prevSH ? "HH" : "LH"
+        if showStructure
+            lCol = lastHighType == "HH" ? colBullStruct : colBearStruct
+            label.new(bar_index - swingLen, swingHigh, lastHighType, style=label.style_label_down, color=color.new(lCol, 80), textcolor=lCol, size=size.tiny)
+        if showStructLine and not na(prevSHBar)
+            lCol2 = lastHighType == "HH" ? colBullStruct : colBearStruct
+            line.new(prevSHBar, prevSH, lastSHBar, lastSH, color=color.new(lCol2, 60), width=1, style=line.style_dotted)
+
+// ── Swing Low detected ──
+if not na(swingLow)
+    prevSL    := lastSL
+    prevSLBar := lastSLBar
+    lastSL    := swingLow
+    lastSLBar := bar_index - swingLen
+    bosDnFired := false
+
+    if not na(prevSL)
+        lastLowType := swingLow < prevSL ? "LL" : "HL"
+        if showStructure
+            lCol = lastLowType == "HL" ? colBullStruct : colBearStruct
+            label.new(bar_index - swingLen, swingLow, lastLowType, style=label.style_label_up, color=color.new(lCol, 80), textcolor=lCol, size=size.tiny)
+        if showStructLine and not na(prevSLBar)
+            lCol3 = lastLowType == "HL" ? colBullStruct : colBearStruct
+            line.new(prevSLBar, prevSL, lastSLBar, lastSL, color=color.new(lCol3, 60), width=1, style=line.style_dotted)
+
+// ── BOS / CHoCH detection (confirmed bars only, single-fire) ──
+if barstate.isconfirmed and not na(lastSH) and not na(lastSL)
+    // Bullish break
+    if close > lastSH and not bosUpFired
+        bosUpFired := true
+        if trend <= 0
+            chochUp := true
+            trend   := 1
+            if showCHoCH
+                label.new(bar_index, high, "CHoCH", style=label.style_label_down, color=color.new(colBullStruct, 50), textcolor=colBullStruct, size=size.small)
+                line.new(lastSHBar, lastSH, bar_index, lastSH, color=colBullStruct, width=2, style=line.style_dashed)
+        else
+            bosUp := true
+            if showBOS
+                label.new(bar_index, high, "BOS", style=label.style_label_down, color=color.new(colBullStruct, 50), textcolor=colBullStruct, size=size.small)
+                line.new(lastSHBar, lastSH, bar_index, lastSH, color=colBullStruct, width=1, style=line.style_dashed)
+
+    // Bearish break
+    if close < lastSL and not bosDnFired
+        bosDnFired := true
+        if trend >= 0
+            chochDn := true
+            trend   := -1
+            if showCHoCH
+                label.new(bar_index, low, "CHoCH", style=label.style_label_up, color=color.new(colBearStruct, 50), textcolor=colBearStruct, size=size.small)
+                line.new(lastSLBar, lastSL, bar_index, lastSL, color=colBearStruct, width=2, style=line.style_dashed)
+        else
+            bosDn := true
+            if showBOS
+                label.new(bar_index, low, "BOS", style=label.style_label_up, color=color.new(colBearStruct, 50), textcolor=colBearStruct, size=size.small)
+                line.new(lastSLBar, lastSL, bar_index, lastSL, color=colBearStruct, width=1, style=line.style_dashed)
+
+// ── Weak / Strong Level Detection ──
+// A swing high is "weak" if the trend is bearish (likely to be taken), "strong" if bullish
+// A swing low is "weak" if the trend is bullish (likely to be taken), "strong" if bearish
+var bool lastSHWeak = false
+var bool lastSLWeak = false
+lastSHWeak := trend == -1 or trend == 0  // bearish trend = weak high (target)
+lastSLWeak := trend == 1 or trend == 0   // bullish trend = weak low (target)
+
+// ── Inducement Detection ──
+// Inducement = minor structure break that lures retail before real move
+// A sweep of a weak level followed by a reversal within 3 bars = inducement
+var bool inducementUp = false
+var bool inducementDn = false
+inducementUp := false
+inducementDn := false
+
+if barstate.isconfirmed and not na(lastSH) and not na(lastSL)
+    // Bearish inducement: price breaks above a weak high then closes back below
+    if lastSHWeak and high > lastSH and close < lastSH and close < open
+        inducementDn := true
+    // Bullish inducement: price breaks below a weak low then closes back above
+    if lastSLWeak and low < lastSL and close > lastSL and close > open
+        inducementUp := true
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ORDER BLOCKS (with displacement filter)
+// ══════════════════════════════════════════════════════════════════════════════
+
+var array<box>   obBoxes  = array.new<box>()
+var array<float> obTopArr = array.new<float>()
+var array<float> obBotArr = array.new<float>()
+var array<int>   obDirArr = array.new<int>()     // 1=bull, -1=bear
+var array<bool>  obMitArr = array.new<bool>()
+
+// Helper: check if the current candle is a displacement candle (strong impulse)
+isDisplacement = math.abs(close - open) > atrVal * obDisplacement
+
+// Visual marker for displacement candles
+dispCol = close > open ? colBullStruct : colBearStruct
+barcolor(showOB and isDisplacement and barstate.isconfirmed ? dispCol : na, title="Displacement Candle")
+
+// Bullish OB: last bearish candle BODY before bullish BOS + displacement
+// ICT uses the candle body (open-close), not wicks, for precise OB zones
+if showOB and (bosUp or chochUp) and barstate.isconfirmed and isDisplacement
+    for i = 1 to 10
+        if close[i] < open[i]
+            obTop = open[i]   // body top = open of bearish candle
+            obBot = close[i]  // body bottom = close of bearish candle
+            bx = box.new(bar_index - i, obTop, bar_index + obExtend, obBot, border_color=color.new(colBullOB, 40), bgcolor=colBullOB, border_width=1)
+            array.push(obBoxes, bx)
+            array.push(obTopArr, obTop)
+            array.push(obBotArr, obBot)
+            array.push(obDirArr, 1)
+            array.push(obMitArr, false)
+            if array.size(obBoxes) > obMaxCount
+                box.delete(array.shift(obBoxes))
+                array.shift(obTopArr)
+                array.shift(obBotArr)
+                array.shift(obDirArr)
+                array.shift(obMitArr)
+            break
+
+// Bearish OB: last bullish candle BODY before bearish BOS + displacement
+if showOB and (bosDn or chochDn) and barstate.isconfirmed and isDisplacement
+    for i = 1 to 10
+        if close[i] > open[i]
+            obTop = close[i]  // body top = close of bullish candle
+            obBot = open[i]   // body bottom = open of bullish candle
+            bx = box.new(bar_index - i, obTop, bar_index + obExtend, obBot, border_color=color.new(colBearOB, 40), bgcolor=colBearOB, border_width=1)
+            array.push(obBoxes, bx)
+            array.push(obTopArr, obTop)
+            array.push(obBotArr, obBot)
+            array.push(obDirArr, -1)
+            array.push(obMitArr, false)
+            if array.size(obBoxes) > obMaxCount
+                box.delete(array.shift(obBoxes))
+                array.shift(obTopArr)
+                array.shift(obBotArr)
+                array.shift(obDirArr)
+                array.shift(obMitArr)
+            break
+
+// OB mitigation check + stop extending mitigated boxes
+if array.size(obBoxes) > 0
+    for i = array.size(obBoxes) - 1 to 0
+        if i < array.size(obBoxes) and not array.get(obMitArr, i)
+            oT = array.get(obTopArr, i)
+            oB = array.get(obBotArr, i)
+            oD = array.get(obDirArr, i)
+            // Bull OB mitigated: price drops back into it from above
+            mitigated = (oD == 1 and low <= oT and close[1] > oT)
+            // Bear OB mitigated: price rises back into it from below
+            mitigated := mitigated or (oD == -1 and high >= oB and close[1] < oB)
+            if mitigated
+                array.set(obMitArr, i, true)
+                box.set_bgcolor(array.get(obBoxes, i), colMitOB)
+                box.set_border_color(array.get(obBoxes, i), colMitOB)
+                box.set_right(array.get(obBoxes, i), bar_index)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FAIR VALUE GAPS (with proper mitigation)
+// ══════════════════════════════════════════════════════════════════════════════
+
+var array<box>   fvgBoxes   = array.new<box>()
+var array<line>  fvgCELines = array.new<line>()
+var array<float> fvgTopArr  = array.new<float>()
+var array<float> fvgBotArr  = array.new<float>()
+var array<int>   fvgDirArr  = array.new<int>()
+var array<bool>  fvgMitArr  = array.new<bool>()
+
+if showFVG and barstate.isconfirmed
+    minGap = close * fvgMinPct / 100.0
+
+    // Bullish FVG: gap between candle[2].high and candle[0].low
+    if low > high[2] and (low - high[2]) >= minGap
+        fTop = low
+        fBot = high[2]
+        fCE  = (fTop + fBot) / 2.0
+
+        bx = box.new(bar_index - 2, fTop, bar_index + fvgExtend, fBot, border_color=color.new(colBullFVG, 50), bgcolor=colBullFVG, border_width=0)
+        array.push(fvgBoxes, bx)
+        array.push(fvgTopArr, fTop)
+        array.push(fvgBotArr, fBot)
+        array.push(fvgDirArr, 1)
+        array.push(fvgMitArr, false)
+
+        if showCE
+            array.push(fvgCELines, line.new(bar_index - 2, fCE, bar_index + fvgExtend, fCE, color=colCE, style=line.style_dashed, width=1))
+        else
+            array.push(fvgCELines, line(na))
+
+        if array.size(fvgBoxes) > fvgMaxCount
+            box.delete(array.shift(fvgBoxes))
+            ln = array.shift(fvgCELines)
+            if not na(ln)
+                line.delete(ln)
+            array.shift(fvgTopArr)
+            array.shift(fvgBotArr)
+            array.shift(fvgDirArr)
+            array.shift(fvgMitArr)
+
+    // Bearish FVG: gap between candle[2].low and candle[0].high
+    if high < low[2] and (low[2] - high) >= minGap
+        fTop = low[2]
+        fBot = high
+        fCE  = (fTop + fBot) / 2.0
+
+        bx = box.new(bar_index - 2, fTop, bar_index + fvgExtend, fBot, border_color=color.new(colBearFVG, 50), bgcolor=colBearFVG, border_width=0)
+        array.push(fvgBoxes, bx)
+        array.push(fvgTopArr, fTop)
+        array.push(fvgBotArr, fBot)
+        array.push(fvgDirArr, -1)
+        array.push(fvgMitArr, false)
+
+        if showCE
+            array.push(fvgCELines, line.new(bar_index - 2, fCE, bar_index + fvgExtend, fCE, color=colCE, style=line.style_dashed, width=1))
+        else
+            array.push(fvgCELines, line(na))
+
+        if array.size(fvgBoxes) > fvgMaxCount
+            box.delete(array.shift(fvgBoxes))
+            ln = array.shift(fvgCELines)
+            if not na(ln)
+                line.delete(ln)
+            array.shift(fvgTopArr)
+            array.shift(fvgBotArr)
+            array.shift(fvgDirArr)
+            array.shift(fvgMitArr)
+
+// FVG mitigation: bull FVG mitigated when price CLOSES below its top (retracement)
+// bear FVG mitigated when price CLOSES above its bottom
+if array.size(fvgBoxes) > 0
+    for i = array.size(fvgBoxes) - 1 to 0
+        if i < array.size(fvgBoxes) and not array.get(fvgMitArr, i)
+            fT = array.get(fvgTopArr, i)
+            fB = array.get(fvgBotArr, i)
+            fD = array.get(fvgDirArr, i)
+
+            // Bull FVG: mitigated when close drops below the CE (50%)
+            fCE = (fT + fB) / 2.0
+            mitigated = (fD == 1 and close < fCE)
+            // Bear FVG: mitigated when close rises above the CE (50%)
+            mitigated := mitigated or (fD == -1 and close > fCE)
+
+            if mitigated
+                array.set(fvgMitArr, i, true)
+                box.set_bgcolor(array.get(fvgBoxes, i), colMitFVG)
+                box.set_border_color(array.get(fvgBoxes, i), colMitFVG)
+                box.set_right(array.get(fvgBoxes, i), bar_index)
+                celn = array.get(fvgCELines, i)
+                if not na(celn)
+                    line.set_color(celn, color.new(color.gray, 85))
+                    line.set_x2(celn, bar_index)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LIQUIDITY DETECTION
+// ══════════════════════════════════════════════════════════════════════════════
+
+var array<float> liqHighs    = array.new<float>()
+var array<int>   liqHighBars = array.new<int>()
+var array<float> liqLows     = array.new<float>()
+var array<int>   liqLowBars  = array.new<int>()
+
+var bool liqSweepUp = false
+var bool liqSweepDn = false
+liqSweepUp := false
+liqSweepDn := false
+
+// Track which levels have been swept (prevent re-trigger)
+var array<bool> liqHighSwept = array.new<bool>()
+var array<bool> liqLowSwept  = array.new<bool>()
+
+// Equal highs detection
+if showLiquidity and not na(swingHigh)
+    tol = swingHigh * liqTolerance / 100.0
+    if array.size(liqHighs) > 0
+        for i = array.size(liqHighs) - 1 to 0
+            lh = array.get(liqHighs, i)
+            if math.abs(swingHigh - lh) <= tol
+                label.new(bar_index - swingLen, swingHigh, "$$$", style=label.style_label_down, color=color.new(colLiq, 70), textcolor=colLiq, size=size.tiny)
+                line.new(array.get(liqHighBars, i), lh, bar_index - swingLen, swingHigh, color=colLiq, style=line.style_dotted, width=1)
+                break
+    array.push(liqHighs, swingHigh)
+    array.push(liqHighBars, bar_index - swingLen)
+    array.push(liqHighSwept, false)
+    if array.size(liqHighs) > 15
+        array.shift(liqHighs)
+        array.shift(liqHighBars)
+        array.shift(liqHighSwept)
+
+// Equal lows detection
+if showLiquidity and not na(swingLow)
+    tol = swingLow * liqTolerance / 100.0
+    if array.size(liqLows) > 0
+        for i = array.size(liqLows) - 1 to 0
+            ll = array.get(liqLows, i)
+            if math.abs(swingLow - ll) <= tol
+                label.new(bar_index - swingLen, swingLow, "$$$", style=label.style_label_up, color=color.new(colLiq, 70), textcolor=colLiq, size=size.tiny)
+                line.new(array.get(liqLowBars, i), ll, bar_index - swingLen, swingLow, color=colLiq, style=line.style_dotted, width=1)
+                break
+    array.push(liqLows, swingLow)
+    array.push(liqLowBars, bar_index - swingLen)
+    array.push(liqLowSwept, false)
+    if array.size(liqLows) > 15
+        array.shift(liqLows)
+        array.shift(liqLowBars)
+        array.shift(liqLowSwept)
+
+// Liquidity sweep detection — single-fire per level
+if showSweeps and barstate.isconfirmed
+    if array.size(liqHighs) > 0
+        for i = array.size(liqHighs) - 1 to math.max(0, array.size(liqHighs) - 5)
+            if i < array.size(liqHighs) and not array.get(liqHighSwept, i)
+                lh = array.get(liqHighs, i)
+                if high > lh and close < lh
+                    liqSweepUp := true
+                    array.set(liqHighSwept, i, true)
+                    label.new(bar_index, high, "SWEEP", style=label.style_label_down, color=color.new(colLiq, 30), textcolor=color.white, size=size.tiny)
+                    break
+
+    if array.size(liqLows) > 0
+        for i = array.size(liqLows) - 1 to math.max(0, array.size(liqLows) - 5)
+            if i < array.size(liqLows) and not array.get(liqLowSwept, i)
+                ll = array.get(liqLows, i)
+                if low < ll and close > ll
+                    liqSweepDn := true
+                    array.set(liqLowSwept, i, true)
+                    label.new(bar_index, low, "SWEEP", style=label.style_label_up, color=color.new(colLiq, 30), textcolor=color.white, size=size.tiny)
+                    break
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PREVIOUS DAY HIGH / LOW / CLOSE
+// ══════════════════════════════════════════════════════════════════════════════
+
+[pdh, pdl, pdc] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], barmerge.gaps_off, barmerge.lookahead_on)
+
+plot(showPDHL ? pdh : na, "PDH", color=colPDH, linewidth=1, style=plot.style_stepline_diamond)
+plot(showPDHL ? pdl : na, "PDL", color=colPDL, linewidth=1, style=plot.style_stepline_diamond)
+plot(showPDHL ? pdc : na, "PDC", color=colPDC, linewidth=1, style=plot.style_stepline_diamond)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PREVIOUS WEEK HIGH / LOW
+// ══════════════════════════════════════════════════════════════════════════════
+
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_on)
+
+plot(showPWHL ? pwh : na, "PWH", color=colPWHL, linewidth=1, style=plot.style_stepline_diamond)
+plot(showPWHL ? pwl : na, "PWL", color=colPWHL, linewidth=1, style=plot.style_stepline_diamond)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NY MIDNIGHT OPEN (00:00 New York = 12:00 Bangkok)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// NY Midnight = 00:00 EST = 12:00 Bangkok
+// Use daily request.security for reliable detection on all TFs
+nyMidnightOpen = request.security(syminfo.tickerid, "D", open, barmerge.gaps_off, barmerge.lookahead_on)
+
+plot(showNYMO and not na(nyMidnightOpen) ? nyMidnightOpen : na, "NY Midnight", color=colNYMO, linewidth=2, style=plot.style_stepline_diamond)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ASIAN SESSION RANGE
+// ══════════════════════════════════════════════════════════════════════════════
+
+var float asianHigh = na
+var float asianLow  = na
+var bool  asiaActive = false
+
+// inAsia is declared later in SESSIONS section; forward-reference via time() here
+inAsiaEarly = not na(time(timeframe.period, "0600-1500", "Asia/Bangkok"))
+
+if inAsiaEarly and not inAsiaEarly[1]
+    // New Asia session
+    asianHigh := high
+    asianLow  := low
+    asiaActive := true
+
+if inAsiaEarly and asiaActive
+    asianHigh := math.max(asianHigh, high)
+    asianLow  := math.min(asianLow, low)
+
+if not inAsiaEarly and inAsiaEarly[1]
+    asiaActive := false
+
+plot(showAsianRange and not inAsiaEarly and not na(asianHigh) ? asianHigh : na, "Asian High", color=colAsianH, linewidth=1, style=plot.style_cross)
+plot(showAsianRange and not inAsiaEarly and not na(asianLow) ? asianLow : na, "Asian Low", color=colAsianL, linewidth=1, style=plot.style_cross)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PREMIUM / DISCOUNT ZONES
+// ══════════════════════════════════════════════════════════════════════════════
+
+pdRangeHigh = ta.highest(high, pdLookback)
+pdRangeLow  = ta.lowest(low, pdLookback)
+pdEQ        = (pdRangeHigh + pdRangeLow) / 2.0
+inPremium   = close > pdEQ
+inDiscount  = close < pdEQ
+
+// Fibonacci OTE zone (0.62 - 0.79 retracement from swing range)
+pdRange     = pdRangeHigh - pdRangeLow
+oteHighBull = pdRangeLow + pdRange * 0.79  // top of OTE for longs (discount side)
+oteLowBull  = pdRangeLow + pdRange * 0.62  // bottom of OTE for longs
+oteHighBear = pdRangeHigh - pdRange * 0.62 // top of OTE for shorts (premium side)
+oteLowBear  = pdRangeHigh - pdRange * 0.79 // bottom of OTE for shorts
+inOTELong   = close >= oteLowBull and close <= oteHighBull  // sweet spot for longs
+inOTEShort  = close >= oteLowBear and close <= oteHighBear  // sweet spot for shorts
+
+plot(showPremDisc ? pdEQ : na, "Equilibrium", color=color.new(color.white, 60), linewidth=1, style=plot.style_cross)
+plot(showPremDisc ? oteLowBull : na, "OTE Bull Low (.62)", color=color.new(#00E676, 75), linewidth=1, style=plot.style_cross)
+plot(showPremDisc ? oteHighBull : na, "OTE Bull High (.79)", color=color.new(#00E676, 75), linewidth=1, style=plot.style_cross)
+plot(showPremDisc ? oteLowBear : na, "OTE Bear Low (.79)", color=color.new(#FF5252, 75), linewidth=1, style=plot.style_cross)
+plot(showPremDisc ? oteHighBear : na, "OTE Bear High (.62)", color=color.new(#FF5252, 75), linewidth=1, style=plot.style_cross)
+
+eqBgCol = showPremDisc ? (inPremium ? color.new(#FF5252, 97) : color.new(#00E676, 97)) : na
+bgcolor(eqBgCol, title="Premium/Discount BG")
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SESSIONS & KILLZONES (UTC+7)
+// ══════════════════════════════════════════════════════════════════════════════
+
+inAsia   = not na(time(timeframe.period, "0600-1500", "Asia/Bangkok"))
+inLondon = not na(time(timeframe.period, "1500-0000", "Asia/Bangkok"))
+inNY     = not na(time(timeframe.period, "2030-0530", "Asia/Bangkok"))
+inKZ     = not na(time(timeframe.period, "2030-0000", "Asia/Bangkok"))
+
+bgcolor(showSessions and inAsia and not inLondon ? colAsia : na, title="Asia BG")
+bgcolor(showSessions and inLondon and not inKZ ? colLondon : na, title="London BG")
+bgcolor(showSessions and inNY and not inKZ ? colNY : na, title="NY BG")
+bgcolor(showKZ and inKZ ? colKZ : na, title="Killzone BG")
+
+// Session open labels only on TFs <= 4H (avoid clutter on D/W/M)
+sessLabelOk = timeframe.in_seconds() <= 14400
+if showSessOpen and sessLabelOk
+    if inAsia and not inAsia[1]
+        label.new(bar_index, high, "ASIA", style=label.style_label_down, color=color.new(#FFEB3B, 60), textcolor=#FFEB3B, size=size.tiny)
+    if inLondon and not inLondon[1]
+        label.new(bar_index, high, "LDN", style=label.style_label_down, color=color.new(#2196F3, 60), textcolor=#2196F3, size=size.tiny)
+    if inNY and not inNY[1]
+        label.new(bar_index, high, "NY", style=label.style_label_down, color=color.new(#9C27B0, 60), textcolor=#9C27B0, size=size.tiny)
+
+currentSession() =>
+    inKZ ? "KILLZONE" : inNY ? "New York" : inLondon ? "London" : inAsia ? "Asia" : "Off Hours"
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MULTI-TIMEFRAME BIAS (no lookahead to prevent repainting)
+// ══════════════════════════════════════════════════════════════════════════════
+
+htfEma20  = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfEmaFast), barmerge.gaps_off, barmerge.lookahead_off)
+htfEma50  = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfEmaMid), barmerge.gaps_off, barmerge.lookahead_off)
+htfEma200 = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfEmaSlow), barmerge.gaps_off, barmerge.lookahead_off)
+
+htfBullishRaw = htfEma20 > htfEma50 and htfEma50 > htfEma200
+htfBearishRaw = htfEma20 < htfEma50 and htfEma50 < htfEma200
+
+// Fast 4H bias check — override Daily if disagreement persists
+ema20Fast = ta.ema(close, 20)
+ema50Fast = ta.ema(close, 50)
+fast4HBull = ema20Fast > ema50Fast
+fast4HBear = ema20Fast < ema50Fast
+
+// Track how long the disagreement lasts
+var int disagreeBars = 0
+disagree = (htfBullishRaw and fast4HBear) or (htfBearishRaw and fast4HBull)
+if disagree
+    disagreeBars := disagreeBars + 1
+else
+    disagreeBars := 0
+
+// HTF override only applies on TFs >= 4H (lower TFs should respect Daily fully)
+overrideAllowed = timeframe.in_seconds() >= 14400
+useOverride = overrideAllowed and disagreeBars > 5
+htfBullish = useOverride ? fast4HBull : htfBullishRaw
+htfBearish = useOverride ? fast4HBear : htfBearishRaw
+htfBias    = htfBullish ? 1 : htfBearish ? -1 : 0
+
+htfBiasCol = htfBias == 1 ? color.new(#00E676, 95) : htfBias == -1 ? color.new(#FF5252, 95) : color.new(#9E9E9E, 97)
+bgcolor(showHTF ? htfBiasCol : na, title="HTF Bias BG")
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SQUEEZE DETECTION
+// ══════════════════════════════════════════════════════════════════════════════
+
+bbBasis = ta.sma(close, 20)
+bbDev   = 2.0 * ta.stdev(close, 20)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+kcBasis = ta.ema(close, 20)
+kcRange = 1.5 * ta.atr(10)
+kcUpper = kcBasis + kcRange
+kcLower = kcBasis - kcRange
+
+sqzOn  = bbLower > kcLower and bbUpper < kcUpper
+sqzMom = ta.linreg(close - bbBasis, 20, 0)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ICT CONFLUENCE ENGINE (10 factors + penalty)
+// ══════════════════════════════════════════════════════════════════════════════
+
+nearBullOB() =>
+    result = false
+    if array.size(obTopArr) > 0
+        for i = array.size(obTopArr) - 1 to 0
+            if array.get(obDirArr, i) == 1 and not array.get(obMitArr, i)
+                prox = close * obProximityPct / 100.0
+                if close >= array.get(obBotArr, i) - prox and close <= array.get(obTopArr, i) + prox
+                    result := true
+                    break
+    result
+
+nearBearOB() =>
+    result = false
+    if array.size(obTopArr) > 0
+        for i = array.size(obTopArr) - 1 to 0
+            if array.get(obDirArr, i) == -1 and not array.get(obMitArr, i)
+                prox = close * obProximityPct / 100.0
+                if close >= array.get(obBotArr, i) - prox and close <= array.get(obTopArr, i) + prox
+                    result := true
+                    break
+    result
+
+nearBullFVG() =>
+    result = false
+    if array.size(fvgTopArr) > 0
+        for i = array.size(fvgTopArr) - 1 to 0
+            if array.get(fvgDirArr, i) == 1 and not array.get(fvgMitArr, i)
+                prox = close * obProximityPct / 100.0
+                if close >= array.get(fvgBotArr, i) - prox and close <= array.get(fvgTopArr, i) + prox
+                    result := true
+                    break
+    result
+
+nearBearFVG() =>
+    result = false
+    if array.size(fvgTopArr) > 0
+        for i = array.size(fvgTopArr) - 1 to 0
+            if array.get(fvgDirArr, i) == -1 and not array.get(fvgMitArr, i)
+                prox = close * obProximityPct / 100.0
+                if close >= array.get(fvgBotArr, i) - prox and close <= array.get(fvgTopArr, i) + prox
+                    result := true
+                    break
+    result
+
+// Cache proximity checks (avoid double-calling in confluence + signal trigger)
+isBullOB  = nearBullOB()
+isBearOB  = nearBearOB()
+isBullFVG = nearBullFVG()
+isBearFVG = nearBearFVG()
+
+// Key level proximity check: price near PDH/PDL/Asian range/NY Midnight
+keyLevelProx = atrVal * 0.5
+nearPDH    = not na(pdh) and math.abs(close - pdh) <= keyLevelProx
+nearPDL    = not na(pdl) and math.abs(close - pdl) <= keyLevelProx
+nearAsianH = not na(asianHigh) and not inAsiaEarly and math.abs(close - asianHigh) <= keyLevelProx
+nearAsianL = not na(asianLow) and not inAsiaEarly and math.abs(close - asianLow) <= keyLevelProx
+nearNYMO   = not na(nyMidnightOpen) and math.abs(close - nyMidnightOpen) <= keyLevelProx
+// Bullish key level = price near support (PDL, Asian Low, NYMO from below)
+nearBullKeyLevel = nearPDL or nearAsianL or (nearNYMO and close < nyMidnightOpen)
+// Bearish key level = price near resistance (PDH, Asian High, NYMO from above)
+nearBearKeyLevel = nearPDH or nearAsianH or (nearNYMO and close > nyMidnightOpen)
+
+calcBullConf() =>
+    s = 0
+    // 1. Structure alignment
+    if trend == 1
+        s += 1
+    // 2. Order Block at entry
+    if isBullOB
+        s += 1
+    // 3. FVG at entry
+    if isBullFVG
+        s += 1
+    // 4. Liquidity sweep (smart money grabbed lows)
+    if liqSweepDn or inducementUp
+        s += 1
+    // 5. Volume confirmation
+    if highVol
+        s += 1
+    // 6. Killzone timing
+    if inKZ
+        s += 1
+    // 7. HTF bias alignment
+    if htfBias == 1
+        s += 1
+    // 8. Discount zone (buying cheap)
+    if inDiscount
+        s += 1
+    // 9. OTE zone (optimal fib entry)
+    if inOTELong
+        s += 1
+    // 10. Near key support level (PDL, Asian Low, NY Midnight)
+    if nearBullKeyLevel
+        s += 1
+    // PENALTY: buying in premium = bad
+    if inPremium
+        s -= 1
+    math.max(s, 0)
+
+calcBearConf() =>
+    s = 0
+    if trend == -1
+        s += 1
+    if isBearOB
+        s += 1
+    if isBearFVG
+        s += 1
+    if liqSweepUp or inducementDn
+        s += 1
+    if highVol
+        s += 1
+    if inKZ
+        s += 1
+    if htfBias == -1
+        s += 1
+    if inPremium
+        s += 1
+    if inOTEShort
+        s += 1
+    // 10. Near key resistance level (PDH, Asian High, NY Midnight)
+    if nearBearKeyLevel
+        s += 1
+    // PENALTY: selling in discount = bad
+    if inDiscount
+        s -= 1
+    math.max(s, 0)
+
+bullConf = calcBullConf()
+bearConf = calcBearConf()
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ENTRY SIGNALS + RISK/REWARD (with cooldown)
+// ══════════════════════════════════════════════════════════════════════════════
+
+var string lastSignal    = "NONE"
+var int    lastConfScore = 0
+var int    lastSigBar    = 0
+var float  lastEntryPrice = na
+var float  lastSLPrice    = na
+var float  lastTPPrice    = na
+var string lastSigDir     = ""  // track direction to prevent same-dir spam
+
+// BOS/CHoCH trigger window — allows entry within N bars after the break
+var int bullTriggerBar = 0
+var int bearTriggerBar = 0
+triggerWindow = 5
+
+if bosUp or chochUp
+    bullTriggerBar := bar_index
+if bosDn or chochDn
+    bearTriggerBar := bar_index
+
+// Find the NEAREST swing for SL (not just the last tracked one which can be old)
+// For LONG SL: find the lowest low within recent swingLen*3 bars
+// For SHORT SL: find the highest high within recent swingLen*3 bars
+recentSLLong  = ta.lowest(low, swingLen * 3)
+recentSLShort = ta.highest(high, swingLen * 3)
+
+// Auto-clear stale signals (older than 30 bars — tighter)
+if lastSignal != "NONE" and (bar_index - lastSigBar) > 30
+    lastSignal := "NONE"
+    lastSigDir := ""
+
+// Auto-clear opposite-direction signals when structure flips
+if lastSignal == "LONG" and trend == -1
+    lastSignal := "NONE"
+    lastSigDir := ""
+if lastSignal == "SHORT" and trend == 1
+    lastSignal := "NONE"
+    lastSigDir := ""
+
+// Auto-clear signal if price moved too far from entry (> 3x ATR = invalidated)
+if lastSignal != "NONE" and not na(lastEntryPrice) and not na(atrVal)
+    priceDist = math.abs(close - lastEntryPrice)
+    if priceDist > atrVal * 3
+        lastSignal := "NONE"
+        lastSigDir := ""
+
+if showSignals and barstate.isconfirmed
+    cooldownOk   = (bar_index - lastSigBar) >= sigCooldown
+    bullWindowOk = (bar_index - bullTriggerBar) <= triggerWindow and bullTriggerBar > 0
+    bearWindowOk = (bar_index - bearTriggerBar) <= triggerWindow and bearTriggerBar > 0
+
+    // Zone filter: block counter-zone entries
+    longZoneOk  = blockCounterZone ? not inPremium : true
+    shortZoneOk = blockCounterZone ? not inDiscount : true
+
+    // Prevent same-direction spam: only signal if direction flips or new structure
+    longDirOk   = lastSigDir != "LONG" or (bosUp or chochUp)
+    shortDirOk  = lastSigDir != "SHORT" or (bosDn or chochDn)
+
+    longTrigger  = bullWindowOk and bullConf >= minConfluence and (isBullOB or isBullFVG) and cooldownOk and longZoneOk and longDirOk
+    shortTrigger = bearWindowOk and bearConf >= minConfluence and (isBearOB or isBearFVG) and cooldownOk and shortZoneOk and shortDirOk
+
+    if longTrigger
+        // Use the better SL: max of lastSL (structure) and recentSLLong (recent low)
+        slPrice    = not na(lastSL) ? math.max(lastSL, recentSLLong) : recentSLLong
+        entryPrice = close
+        riskDist   = entryPrice - slPrice
+
+        // SL sanity check: reject if SL too far (> maxSLAtr * ATR)
+        slTooFar = riskDist > atrVal * maxSLAtr
+
+        if riskDist > 0 and not slTooFar
+            tpPrice  = entryPrice + riskDist * rrRatio
+            actualRR = (tpPrice - entryPrice) / riskDist
+            if actualRR >= minRR
+                lastSignal     := "LONG"
+                lastSigDir     := "LONG"
+                lastConfScore  := bullConf
+                lastSigBar     := bar_index
+                lastEntryPrice := entryPrice
+                lastSLPrice    := slPrice
+                lastTPPrice    := tpPrice
+
+                posSize = (accountSize * riskPct / 100.0) / riskDist
+                sigText = "LONG " + str.tostring(entryPrice, format.mintick) + "\nConf " + str.tostring(bullConf) + "/10 | R:R " + str.tostring(actualRR, "#.#") + "\nSize: " + str.tostring(posSize, "#.##")
+                label.new(bar_index, low, sigText, style=label.style_label_up, color=color.new(#00E676, 10), textcolor=color.white, size=size.normal)
+
+                if showRR
+                    line.new(bar_index, slPrice, bar_index + 20, slPrice, color=#FF5252, style=line.style_dashed, width=1)
+                    line.new(bar_index, tpPrice, bar_index + 20, tpPrice, color=#00E676, style=line.style_dashed, width=1)
+                    label.new(bar_index + 10, slPrice, "SL " + str.tostring(slPrice, format.mintick), style=label.style_label_left, color=color.new(#FF5252, 70), textcolor=#FF5252, size=size.tiny)
+                    label.new(bar_index + 10, tpPrice, "TP " + str.tostring(tpPrice, format.mintick), style=label.style_label_left, color=color.new(#00E676, 70), textcolor=#00E676, size=size.tiny)
+
+    if shortTrigger
+        slPrice    = not na(lastSH) ? math.min(lastSH, recentSLShort) : recentSLShort
+        entryPrice = close
+        riskDist   = slPrice - entryPrice
+        slTooFar   = riskDist > atrVal * maxSLAtr
+
+        if riskDist > 0 and not slTooFar
+            tpPrice  = entryPrice - riskDist * rrRatio
+            actualRR = (entryPrice - tpPrice) / riskDist
+            if actualRR >= minRR
+                lastSignal     := "SHORT"
+                lastSigDir     := "SHORT"
+                lastConfScore  := bearConf
+                lastSigBar     := bar_index
+                lastEntryPrice := entryPrice
+                lastSLPrice    := slPrice
+                lastTPPrice    := tpPrice
+
+                posSize = (accountSize * riskPct / 100.0) / riskDist
+                sigText = "SHORT " + str.tostring(entryPrice, format.mintick) + "\nConf " + str.tostring(bearConf) + "/10 | R:R " + str.tostring(actualRR, "#.#") + "\nSize: " + str.tostring(posSize, "#.##")
+                label.new(bar_index, high, sigText, style=label.style_label_down, color=color.new(#FF5252, 10), textcolor=color.white, size=size.normal)
+
+                if showRR
+                    line.new(bar_index, slPrice, bar_index + 20, slPrice, color=#FF5252, style=line.style_dashed, width=1)
+                    line.new(bar_index, tpPrice, bar_index + 20, tpPrice, color=#00E676, style=line.style_dashed, width=1)
+                    label.new(bar_index + 10, slPrice, "SL " + str.tostring(slPrice, format.mintick), style=label.style_label_left, color=color.new(#FF5252, 70), textcolor=#FF5252, size=size.tiny)
+                    label.new(bar_index + 10, tpPrice, "TP " + str.tostring(tpPrice, format.mintick), style=label.style_label_left, color=color.new(#00E676, 70), textcolor=#00E676, size=size.tiny)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TRADE OUTCOME TRACKING
+// ══════════════════════════════════════════════════════════════════════════════
+
+var int   wins         = 0
+var int   losses       = 0
+var int   breakevens   = 0
+var bool  tradeOpen    = false
+var float tradeEntry   = na
+var float tradeSL      = na
+var float tradeTP      = na
+var float tradeTP1     = na   // TP1 at 1R for partial exit
+var int   tradeDir     = 0   // 1=long, -1=short
+var int   tradeOpenBar = 0
+var bool  tp1Hit       = false
+
+// Check TP/SL on existing trade FIRST
+if tradeOpen
+    // Check SL first (worst case on same bar)
+    slHit = (tradeDir == 1 and low <= tradeSL) or (tradeDir == -1 and high >= tradeSL)
+    tpHit = (tradeDir == 1 and high >= tradeTP) or (tradeDir == -1 and low <= tradeTP)
+    tp1Check = (tradeDir == 1 and high >= tradeTP1) or (tradeDir == -1 and low <= tradeTP1)
+
+    if slHit
+        // If TP1 was already hit, this is a partial loss (net = +0.5R approx)
+        if tp1Hit
+            wins += 1  // partial profit locked at TP1 means net positive
+        else
+            losses += 1
+        tradeOpen := false
+        lossLbl = tradeDir == 1 ? label.style_label_up : label.style_label_down
+        label.new(bar_index, tradeSL, tp1Hit ? "PART" : "LOSS", style=lossLbl, color=color.new(tp1Hit ? #FF9800 : #FF5252, 20), textcolor=color.white, size=size.tiny)
+    else if tpHit
+        wins += 1
+        tradeOpen := false
+        winLbl = tradeDir == 1 ? label.style_label_down : label.style_label_up
+        label.new(bar_index, tradeTP, "WIN", style=winLbl, color=color.new(#00E676, 20), textcolor=color.white, size=size.tiny)
+    else if tp1Check and not tp1Hit
+        // TP1 hit — mark partial but keep trade open
+        // IMPORTANT: do NOT move SL to BE here — ICT retraces to entry before real move
+        tp1Hit := true
+
+    // Trade timeout — close after 100 bars if neither TP nor SL hit
+    if tradeOpen and (bar_index - tradeOpenBar) > 100
+        pnl = tradeDir == 1 ? (close - tradeEntry) : (tradeEntry - close)
+        if pnl > 0
+            wins += 1
+        else if pnl < 0
+            losses += 1
+        else
+            breakevens += 1
+        tradeOpen := false
+        label.new(bar_index, close, "TIMEOUT", style=label.style_label_center, color=color.new(#9E9E9E, 30), textcolor=color.white, size=size.tiny)
+
+// When opposite-direction signal fires, force-close existing trade
+if lastSigBar == bar_index and lastSignal != "NONE" and tradeOpen
+    newDir = lastSignal == "LONG" ? 1 : -1
+    if newDir != tradeDir
+        pnl = tradeDir == 1 ? (close - tradeEntry) : (tradeEntry - close)
+        if pnl > 0
+            wins += 1
+        else if pnl < 0
+            losses += 1
+        else
+            breakevens += 1
+        tradeOpen := false
+
+// Open new virtual trade
+if lastSigBar == bar_index and lastSignal == "LONG" and not tradeOpen
+    tradeOpen    := true
+    tradeEntry   := lastEntryPrice
+    tradeSL      := lastSLPrice
+    tradeTP      := lastTPPrice
+    tradeTP1     := lastEntryPrice + (lastEntryPrice - lastSLPrice)  // TP1 at 1R
+    tradeDir     := 1
+    tradeOpenBar := bar_index
+    tp1Hit       := false
+
+if lastSigBar == bar_index and lastSignal == "SHORT" and not tradeOpen
+    tradeOpen    := true
+    tradeEntry   := lastEntryPrice
+    tradeSL      := lastSLPrice
+    tradeTP      := lastTPPrice
+    tradeTP1     := lastEntryPrice - (lastSLPrice - lastEntryPrice)  // TP1 at 1R
+    tradeDir     := -1
+    tradeOpenBar := bar_index
+    tp1Hit       := false
+
+winRate = (wins + losses) > 0 ? (wins * 100) / (wins + losses) : 0
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VOLUME STRENGTH BARS (color candles by relative volume)
+// ══════════════════════════════════════════════════════════════════════════════
+
+volRatio = volMA > 0 ? volume / volMA : 0
+volColor = volRatio >= 2.0 ? color.new(#00E676, 0) : volRatio >= 1.5 ? color.new(#FFEB3B, 0) : na
+barcolor(showVolBars ? volColor : na, title="Volume Strength")
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PREVIOUS MONTH HIGH / LOW
+// ══════════════════════════════════════════════════════════════════════════════
+
+[pmh, pml] = request.security(syminfo.tickerid, "M", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_on)
+
+plot(showPMHL ? pmh : na, "PMH", color=colPMHL, linewidth=2, style=plot.style_stepline_diamond)
+plot(showPMHL ? pml : na, "PML", color=colPMHL, linewidth=2, style=plot.style_stepline_diamond)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ROUND NUMBER LEVELS (institutional magnets)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Auto-detect round number interval based on price level
+roundInterval = close > 1000 ? 50 : close > 100 ? 10 : close > 10 ? 5 : close > 1 ? 0.5 : 0.05
+nearestRoundUp = math.ceil(close / roundInterval) * roundInterval
+nearestRoundDn = math.floor(close / roundInterval) * roundInterval
+
+plot(showRoundNums ? nearestRoundUp : na, "Round ↑", color=color.new(#9E9E9E, 70), linewidth=1, style=plot.style_cross)
+plot(showRoundNums ? nearestRoundDn : na, "Round ↓", color=color.new(#9E9E9E, 70), linewidth=1, style=plot.style_cross)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STACK OK / NO STACK VISUAL (background)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Stack is safe when: volume > avg AND clear direction AND no squeeze
+stackVolOk = volRatio >= 1.0
+stackDirOk = (trend == 1 and htfBias >= 0) or (trend == -1 and htfBias <= 0)
+stackNoRange = not sqzOn
+stackOk = stackVolOk and stackDirOk and stackNoRange
+
+// Subtle green bar at bottom when safe to stack
+plotshape(showStackZone and stackOk, "Stack OK", shape.square, location.bottom, color.new(#00E676, 85), size=size.tiny)
+plotshape(showStackZone and not stackOk and barstate.isconfirmed, "No Stack", shape.square, location.bottom, color.new(#FF5252, 92), size=size.tiny)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MARKET REGIME DETECTION (risk-on vs risk-off)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Simple regime: if price above 50 EMA AND above 200 EMA = risk-on
+// Used for macro context in dashboard
+riskOnLocal = close > ema20Fast and close > ta.ema(close, 200)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MULTI-TIMEFRAME ALIGNMENT (Daily + 4H + Current)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Get 4H trend independently
+tf4hEma20  = request.security(syminfo.tickerid, "240", ta.ema(close, 20), barmerge.gaps_off, barmerge.lookahead_off)
+tf4hEma50  = request.security(syminfo.tickerid, "240", ta.ema(close, 50), barmerge.gaps_off, barmerge.lookahead_off)
+trend4H    = tf4hEma20 > tf4hEma50 ? 1 : tf4hEma20 < tf4hEma50 ? -1 : 0
+
+// Daily trend (already computed via htfBias for Daily TF default)
+trendDaily = htfBullishRaw ? 1 : htfBearishRaw ? -1 : 0
+
+// Current TF trend = local structure trend
+trendCurrent = trend
+
+// MTF alignment score
+mtfAligned = (trendDaily == trend4H and trend4H == trendCurrent and trendCurrent != 0)
+mtfBullAligned = mtfAligned and trendCurrent == 1
+mtfBearAligned = mtfAligned and trendCurrent == -1
+mtfDir = mtfBullAligned ? "BULL" : mtfBearAligned ? "BEAR" : "MIXED"
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CLOSEST TARGET LEVEL
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Find closest level above and below current price from PDH/PDL/PWH/PWL/Asian/NYMO
+nearestAbove() =>
+    levels = array.new<float>()
+    if not na(pdh) and pdh > close
+        array.push(levels, pdh)
+    if not na(pwh) and pwh > close
+        array.push(levels, pwh)
+    if not na(pmh) and pmh > close
+        array.push(levels, pmh)
+    if not na(asianHigh) and asianHigh > close
+        array.push(levels, asianHigh)
+    if not na(nyMidnightOpen) and nyMidnightOpen > close
+        array.push(levels, nyMidnightOpen)
+    if not na(nearestRoundUp) and nearestRoundUp > close
+        array.push(levels, nearestRoundUp)
+    array.size(levels) > 0 ? array.min(levels) : na
+
+nearestBelow() =>
+    levels = array.new<float>()
+    if not na(pdl) and pdl < close
+        array.push(levels, pdl)
+    if not na(pwl) and pwl < close
+        array.push(levels, pwl)
+    if not na(pml) and pml < close
+        array.push(levels, pml)
+    if not na(asianLow) and asianLow < close
+        array.push(levels, asianLow)
+    if not na(nyMidnightOpen) and nyMidnightOpen < close
+        array.push(levels, nyMidnightOpen)
+    if not na(nearestRoundDn) and nearestRoundDn < close
+        array.push(levels, nearestRoundDn)
+    array.size(levels) > 0 ? array.max(levels) : na
+
+targetUp   = nearestAbove()
+targetDown = nearestBelow()
+
+// Position size calculation for current setup
+calcPositionSize(slDistance) =>
+    riskAmount = accountSize * riskPct / 100.0
+    slDistance > 0 ? riskAmount / slDistance : 0.0
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════════════════════════════════
+
+var table dash = table.new(position.top_right, 2, 22, bgcolor=color.new(#000000, 20), border_width=1, border_color=color.new(#424242, 50), frame_width=1, frame_color=color.new(#616161, 40))
+
+if showDashboard and barstate.islast
+    // Header
+    table.cell(dash, 0, 0, "V6 MACRO", text_color=color.white, text_size=size.small, bgcolor=color.new(#1565C0, 30))
+    table.cell(dash, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small, bgcolor=color.new(#1565C0, 30))
+
+    // Session
+    table.cell(dash, 0, 1, "Session", text_color=#9E9E9E, text_size=size.small)
+    sCol = inKZ ? #FF9800 : inNY ? #9C27B0 : inLondon ? #2196F3 : inAsia ? #FFEB3B : #616161
+    table.cell(dash, 1, 1, currentSession(), text_color=sCol, text_size=size.small)
+
+    // Structure Trend
+    table.cell(dash, 0, 2, "Structure", text_color=#9E9E9E, text_size=size.small)
+    tCol = trend == 1 ? #00E676 : trend == -1 ? #FF5252 : #9E9E9E
+    tTxt = trend == 1 ? "BULLISH" : trend == -1 ? "BEARISH" : "NEUTRAL"
+    table.cell(dash, 1, 2, tTxt, text_color=tCol, text_size=size.small)
+
+    // HTF Bias
+    table.cell(dash, 0, 3, "HTF (" + htfTF + ")", text_color=#9E9E9E, text_size=size.small)
+    hCol = htfBias == 1 ? #00E676 : htfBias == -1 ? #FF5252 : #9E9E9E
+    hTxt = htfBias == 1 ? "BULLISH" : htfBias == -1 ? "BEARISH" : "NEUTRAL"
+    table.cell(dash, 1, 3, hTxt, text_color=hCol, text_size=size.small)
+
+    // Premium / Discount + OTE
+    table.cell(dash, 0, 4, "Zone", text_color=#9E9E9E, text_size=size.small)
+    zCol = inPremium ? #FF5252 : #00E676
+    zTxt = inPremium ? "PREMIUM" : "DISCOUNT"
+    if inOTELong or inOTEShort
+        zTxt := zTxt + " [OTE]"
+        zCol := #FFEB3B
+    table.cell(dash, 1, 4, zTxt, text_color=zCol, text_size=size.small)
+
+    // Squeeze
+    table.cell(dash, 0, 5, "Squeeze", text_color=#9E9E9E, text_size=size.small)
+    sqCol = sqzOn ? #FFEB3B : #616161
+    sqTxt = sqzOn ? "ON (" + (sqzMom > 0 ? "+" : "-") + ")" : "OFF"
+    table.cell(dash, 1, 5, sqTxt, text_color=sqCol, text_size=size.small)
+
+    // ATR
+    table.cell(dash, 0, 6, "ATR(14)", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 6, str.tostring(atrVal, format.mintick), text_color=color.white, text_size=size.small)
+
+    // PDH / PDL
+    table.cell(dash, 0, 7, "PDH / PDL", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 7, str.tostring(pdh, format.mintick) + " / " + str.tostring(pdl, format.mintick), text_color=color.white, text_size=size.small)
+
+    // Confluence
+    confNow = math.max(bullConf, bearConf)
+    confCol = confNow >= minConfluence ? #00E676 : confNow >= 2 ? #FFEB3B : #FF5252
+    confDir = bullConf > bearConf ? "L" : bearConf > bullConf ? "S" : "-"
+    table.cell(dash, 0, 8, "Confluence", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 8, str.tostring(confNow) + "/10 (" + confDir + ")", text_color=confCol, text_size=size.small)
+
+    // Last Signal — show with age in bars
+    table.cell(dash, 0, 9, "Signal", text_color=#9E9E9E, text_size=size.small)
+    sgCol = lastSignal == "LONG" ? #00E676 : lastSignal == "SHORT" ? #FF5252 : #616161
+    sgTxt = lastSignal
+    if lastSignal != "NONE"
+        sigAge = bar_index - lastSigBar
+        sgTxt := lastSignal + " @ " + str.tostring(lastEntryPrice, format.mintick) + " (" + str.tostring(sigAge) + "b)"
+        // Fade color if signal is old
+        if sigAge > 20
+            sgCol := color.new(sgCol, 50)
+    table.cell(dash, 1, 9, sgTxt, text_color=sgCol, text_size=size.small)
+
+    // Volume
+    table.cell(dash, 0, 10, "Volume", text_color=#9E9E9E, text_size=size.small)
+    volCol = highVol ? #00E676 : #9E9E9E
+    volPct = volMA > 0 ? (volume / volMA * 100) : 0
+    table.cell(dash, 1, 10, str.tostring(volPct, "#") + "% avg", text_color=volCol, text_size=size.small)
+
+    // PWH / PWL
+    table.cell(dash, 0, 11, "PWH / PWL", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 11, str.tostring(pwh, format.mintick) + " / " + str.tostring(pwl, format.mintick), text_color=#E040FB, text_size=size.small)
+
+    // NY Midnight Open
+    table.cell(dash, 0, 12, "NY 00:00", text_color=#9E9E9E, text_size=size.small)
+    nymoTxt = not na(nyMidnightOpen) ? str.tostring(nyMidnightOpen, format.mintick) : "—"
+    nymoBias = not na(nyMidnightOpen) ? (close > nyMidnightOpen ? "above" : "below") : ""
+    nymoCol = close > nyMidnightOpen ? #00E676 : #FF5252
+    table.cell(dash, 1, 12, nymoTxt + " " + nymoBias, text_color=not na(nyMidnightOpen) ? nymoCol : #616161, text_size=size.small)
+
+    // Win/Loss record
+    table.cell(dash, 0, 13, "Record", text_color=#9E9E9E, text_size=size.small)
+    totalTrades = wins + losses
+    wrCol = winRate >= 50 ? #00E676 : winRate > 0 ? #FF9800 : #616161
+    wrTxt = totalTrades > 0 ? str.tostring(wins) + "W " + str.tostring(losses) + "L (" + str.tostring(winRate, "#") + "%)" : "No trades"
+    table.cell(dash, 1, 13, wrTxt, text_color=wrCol, text_size=size.small)
+
+    // Conviction score (combines confluence + alignment + win rate)
+    convScore = math.max(bullConf, bearConf)
+    aligned = (trend == 1 and htfBias == 1) or (trend == -1 and htfBias == -1)
+    if aligned
+        convScore += 2
+    if winRate >= 50 and totalTrades >= 5
+        convScore += 1
+    // Conviction only when there's an active signal or high confluence
+    convText = ""
+    convCol  = #616161
+    if lastSignal != "NONE" or convScore >= 6
+        convText := convScore >= 8 ? "VERY HIGH" : convScore >= 6 ? "HIGH" : convScore >= 4 ? "MEDIUM" : "LOW"
+        convCol  := convScore >= 8 ? #00E676 : convScore >= 6 ? #4CAF50 : convScore >= 4 ? #FFEB3B : #FF5252
+    else
+        convText := "—"
+    table.cell(dash, 0, 14, "Conviction", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 14, convText, text_color=convCol, text_size=size.small)
+
+    // MTF Alignment (Daily / 4H / Current)
+    mtfText = (trendDaily == 1 ? "↑" : trendDaily == -1 ? "↓" : "·") + " " + (trend4H == 1 ? "↑" : trend4H == -1 ? "↓" : "·") + " " + (trendCurrent == 1 ? "↑" : trendCurrent == -1 ? "↓" : "·")
+    mtfCol = mtfBullAligned ? #00E676 : mtfBearAligned ? #FF5252 : #FFEB3B
+    table.cell(dash, 0, 15, "MTF (D/4H/cur)", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 15, mtfText + " " + mtfDir, text_color=mtfCol, text_size=size.small)
+
+    // Closest target levels
+    targetTxt = (not na(targetUp) ? str.tostring(targetUp, format.mintick) : "—") + " / " + (not na(targetDown) ? str.tostring(targetDown, format.mintick) : "—")
+    table.cell(dash, 0, 16, "Targets ↑/↓", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 16, targetTxt, text_color=#00BCD4, text_size=size.small)
+
+    // PMH / PML
+    table.cell(dash, 0, 17, "PMH / PML", text_color=#9E9E9E, text_size=size.small)
+    table.cell(dash, 1, 17, str.tostring(pmh, format.mintick) + " / " + str.tostring(pml, format.mintick), text_color=#00BCD4, text_size=size.small)
+
+    // Stack Status
+    table.cell(dash, 0, 18, "Stack", text_color=#9E9E9E, text_size=size.small)
+    stackTxt = stackOk ? "STACK OK" : "NO STACK"
+    stackCol = stackOk ? #00E676 : #FF5252
+    stackDetails = ""
+    if not stackVolOk
+        stackDetails := "low vol"
+    if not stackDirOk
+        stackDetails := stackDetails + (str.length(stackDetails) > 0 ? ", " : "") + "no dir"
+    if not stackNoRange
+        stackDetails := stackDetails + (str.length(stackDetails) > 0 ? ", " : "") + "squeeze"
+    if str.length(stackDetails) > 0
+        stackTxt := stackTxt + " (" + stackDetails + ")"
+    table.cell(dash, 1, 18, stackTxt, text_color=stackCol, text_size=size.small)
+
+    // Regime
+    table.cell(dash, 0, 19, "Regime", text_color=#9E9E9E, text_size=size.small)
+    regTxt = riskOnLocal ? "RISK-ON" : "RISK-OFF"
+    regCol = riskOnLocal ? #00E676 : #FF5252
+    table.cell(dash, 1, 19, regTxt, text_color=regCol, text_size=size.small)
+
+    // V6 — MTF Bias row
+    if useMTFBias and showMTFRow
+        table.cell(dash, 0, 20, "MTF D/4H/1H", text_color=#9E9E9E, text_size=size.small)
+        mtfDChar  = mtfD == 1 ? "▲" : mtfD == -1 ? "▼" : "·"
+        mtfH4Char = mtfH4 == 1 ? "▲" : mtfH4 == -1 ? "▼" : "·"
+        mtfH1Char = mtfH1 == 1 ? "▲" : mtfH1 == -1 ? "▼" : "·"
+        mtfTxt = mtfDChar + " " + mtfH4Char + " " + mtfH1Char + " · " + str.tostring(math.abs(mtfSum)) + "/4"
+        mtfCol = mtfStronglyAligned ? (mtfSum > 0 ? #00E676 : #FF5252) : #FFEB3B
+        table.cell(dash, 1, 20, mtfTxt, text_color=mtfCol, text_size=size.small)
+
+    // V6 — P3 + News Blackout status row
+    if showP3 or useNewsBlack
+        table.cell(dash, 0, 21, "P3 / News", text_color=#9E9E9E, text_size=size.small)
+        p3Disp  = showP3 ? p3Phase : ""
+        newsDisp = useNewsBlack and newsBlackout ? " · 🚫 BLACKOUT" : useNewsBlack ? " · OK" : ""
+        table.cell(dash, 1, 21, p3Disp + newsDisp, text_color=p3Col, text_size=size.small)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · VIX RISK-OFF FILTER (fetch TVC:VIX, tint background, optionally block longs)
+// ══════════════════════════════════════════════════════════════════════════════
+
+vixVal   = useVixFilter ? request.security("TVC:VIX", "D", close, barmerge.gaps_off, barmerge.lookahead_off) : na
+vixHigh  = useVixFilter and not na(vixVal) and vixVal > vixThreshold
+vixCalm  = useVixFilter and not na(vixVal) and vixVal < 15.0
+bgcolor(useVixFilter and vixHigh ? colVixStress : na, title="VIX Stress")
+// VIX-aware label on last bar (subtle)
+if useVixFilter and barstate.islast and not na(vixVal)
+    vixLblCol = vixHigh ? color.new(#FF5252, 30) : vixCalm ? color.new(#00E676, 30) : color.new(#FFB800, 30)
+    vixTxt    = "VIX " + str.tostring(vixVal, "#.#")
+    label.new(bar_index + 2, high, vixTxt, style=label.style_label_left, color=vixLblCol, textcolor=color.white, size=size.tiny)
+
+// Block long signals when VIX > threshold (if user enabled)
+vixLongBlock = useVixFilter and blockTradesHighVix and vixHigh
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · ANCHORED VWAP (Daily + Weekly + optional bands)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Daily VWAP — anchored at session start of the day (NY 00:00 = our Asia/Bangkok day start approx)
+hlc3 = (high + low + close) / 3.0
+var float vwapDayNum = 0.0
+var float vwapDayDen = 0.0
+var float vwapDayDevSum = 0.0
+isNewDay = ta.change(time("D")) != 0
+if isNewDay
+    vwapDayNum := 0.0
+    vwapDayDen := 0.0
+    vwapDayDevSum := 0.0
+vwapDayNum := vwapDayNum + hlc3 * volume
+vwapDayDen := vwapDayDen + volume
+vwapDay = vwapDayDen > 0 ? vwapDayNum / vwapDayDen : na
+if not na(vwapDay)
+    vwapDayDevSum := vwapDayDevSum + math.pow(hlc3 - vwapDay, 2) * volume
+vwapDayStd = vwapDayDen > 0 ? math.sqrt(vwapDayDevSum / vwapDayDen) : na
+
+// Weekly VWAP
+var float vwapWeekNum = 0.0
+var float vwapWeekDen = 0.0
+isNewWeek = ta.change(time("W")) != 0
+if isNewWeek
+    vwapWeekNum := 0.0
+    vwapWeekDen := 0.0
+vwapWeekNum := vwapWeekNum + hlc3 * volume
+vwapWeekDen := vwapWeekDen + volume
+vwapWeek = vwapWeekDen > 0 ? vwapWeekNum / vwapWeekDen : na
+
+plot(showVwapDaily ? vwapDay : na, "Daily VWAP", color=colVwapDaily, linewidth=2)
+plot(showVwapWeekly ? vwapWeek : na, "Weekly VWAP", color=colVwapWeekly, linewidth=2, style=plot.style_circles)
+plot(showVwapBands and showVwapDaily and not na(vwapDayStd) ? vwapDay + vwapDayStd : na, "VWAP +1σ", color=colVwapBand, linewidth=1)
+plot(showVwapBands and showVwapDaily and not na(vwapDayStd) ? vwapDay - vwapDayStd : na, "VWAP -1σ", color=colVwapBand, linewidth=1)
+plot(showVwapBands and showVwapDaily and not na(vwapDayStd) ? vwapDay + 2*vwapDayStd : na, "VWAP +2σ", color=color.new(colVwapBand, 85), linewidth=1)
+plot(showVwapBands and showVwapDaily and not na(vwapDayStd) ? vwapDay - 2*vwapDayStd : na, "VWAP -2σ", color=color.new(colVwapBand, 85), linewidth=1)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · KILLZONE BACKGROUND HIGHLIGHT (Asia / London / NY-overlap in UTC+7)
+// ══════════════════════════════════════════════════════════════════════════════
+// Session times in UTC+7 (Koh Samui):
+//   Asia       03:00-07:00 (institutional Asia accumulation)
+//   London KZ  14:00-18:00 (often "Judas swing" first hour)
+//   NY Open    19:00-22:00 (LN/NY overlap = PRIME)
+
+inAsianKZ  = not na(time(timeframe.period, "0300-0700", "Asia/Bangkok"))
+inLondonKZ = not na(time(timeframe.period, "1400-1800", "Asia/Bangkok"))
+inNYKZ     = not na(time(timeframe.period, "1900-2200", "Asia/Bangkok"))
+
+bgcolor(showKZ and showAsianKZ and inAsianKZ ? colAsianKZ : na, title="Asia KZ")
+bgcolor(showKZ and showLondonKZ and inLondonKZ ? colLondonKZ : na, title="London KZ")
+bgcolor(showKZ and showNYOpenKZ and inNYKZ ? colNYKZ : na, title="NY KZ PRIME")
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · BREAKER BLOCKS (failed OB → opposite S/R when broken)
+// ══════════════════════════════════════════════════════════════════════════════
+// Concept: When a bullish OB is broken by price (close below its bottom), it
+// transforms into a *bearish breaker* — a resistance zone going forward.
+// Vice versa for bearish OBs broken upward → bullish breakers.
+
+var array<box> bullBreakerBoxes = array.new<box>()
+var array<box> bearBreakerBoxes = array.new<box>()
+var array<float> bullBreakerTops  = array.new_float()
+var array<float> bullBreakerBots  = array.new_float()
+var array<float> bearBreakerTops  = array.new_float()
+var array<float> bearBreakerBots  = array.new_float()
+var array<int>   bullBreakerBars  = array.new_int()
+var array<int>   bearBreakerBars  = array.new_int()
+
+// Detect breakers by inspecting any tracked OBs that get violated
+// Uses existing OB engine arrays: obBoxes, obTopArr, obBotArr, obDirArr, obMitArr
+// dir == 1 = bullish OB · dir == -1 = bearish OB
+if showBreaker and barstate.isconfirmed and array.size(obBoxes) > 0
+    for i = array.size(obBoxes) - 1 to 0
+        if i < array.size(obBoxes)
+            obTop = array.get(obTopArr, i)
+            obBot = array.get(obBotArr, i)
+            obDir = array.get(obDirArr, i)
+            // Bullish OB broken DOWN → BEARISH breaker (resistance going forward)
+            if obDir == 1 and close < obBot and close[1] >= obBot
+                newBox = box.new(bar_index, obTop, bar_index + breakerExtend, obBot,
+                  bgcolor=colBearBreaker, border_color=color.new(#EC407A, 50), border_width=1, text="BR", text_color=color.new(#EC407A, 0), text_size=size.tiny, text_halign=text.align_left)
+                array.push(bearBreakerBoxes, newBox)
+                array.push(bearBreakerTops, obTop)
+                array.push(bearBreakerBots, obBot)
+                array.push(bearBreakerBars, bar_index)
+                if array.size(bearBreakerBoxes) > 6
+                    box.delete(array.shift(bearBreakerBoxes))
+                    array.shift(bearBreakerTops)
+                    array.shift(bearBreakerBots)
+                    array.shift(bearBreakerBars)
+            // Bearish OB broken UP → BULLISH breaker (support going forward)
+            if obDir == -1 and close > obTop and close[1] <= obTop
+                newBox = box.new(bar_index, obTop, bar_index + breakerExtend, obBot,
+                  bgcolor=colBullBreaker, border_color=color.new(#26C6DA, 50), border_width=1, text="BR", text_color=color.new(#26C6DA, 0), text_size=size.tiny, text_halign=text.align_left)
+                array.push(bullBreakerBoxes, newBox)
+                array.push(bullBreakerTops, obTop)
+                array.push(bullBreakerBots, obBot)
+                array.push(bullBreakerBars, bar_index)
+                if array.size(bullBreakerBoxes) > 6
+                    box.delete(array.shift(bullBreakerBoxes))
+                    array.shift(bullBreakerTops)
+                    array.shift(bullBreakerBots)
+                    array.shift(bullBreakerBars)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · MULTI-TIMEFRAME BIAS (Daily + 4H + 1H EMA alignment)
+// ══════════════════════════════════════════════════════════════════════════════
+
+mtfBiasFor(string tf) =>
+    emaF = request.security(syminfo.tickerid, tf, ta.ema(close, mtfEmaFast), barmerge.gaps_off, barmerge.lookahead_off)
+    emaS = request.security(syminfo.tickerid, tf, ta.ema(close, mtfEmaSlow), barmerge.gaps_off, barmerge.lookahead_off)
+    px   = request.security(syminfo.tickerid, tf, close, barmerge.gaps_off, barmerge.lookahead_off)
+    bias = px > emaF and emaF > emaS ? 1 : px < emaF and emaF < emaS ? -1 : 0
+    bias
+
+mtfD  = useMTFBias ? mtfBiasFor("D")   : 0
+mtfH4 = useMTFBias ? mtfBiasFor("240") : 0
+mtfH1 = useMTFBias ? mtfBiasFor("60")  : 0
+mtfCur = trend  // current TF trend from structure engine
+
+mtfSum = mtfD + mtfH4 + mtfH1 + (mtfCur != 0 ? mtfCur : 0)
+mtfAligned = math.abs(mtfSum) == 4  // all four agree
+mtfStronglyAligned = math.abs(mtfSum) >= 3
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · INVERSE FAIR VALUE GAPS (IFVG)
+// ══════════════════════════════════════════════════════════════════════════════
+// When a bullish FVG is fully closed (price closes below its low) it inverts:
+// the zone becomes a BEARISH resistance. And vice versa.
+
+var array<box>   ifvgBoxes  = array.new<box>()
+var array<float> ifvgTopArr = array.new_float()
+var array<float> ifvgBotArr = array.new_float()
+var array<int>   ifvgDirArr = array.new_int()
+
+if showIFVG and barstate.isconfirmed and array.size(fvgBoxes) > 0
+    for i = array.size(fvgBoxes) - 1 to 0
+        if i < array.size(fvgBoxes)
+            fTop = array.get(fvgTopArr, i)
+            fBot = array.get(fvgBotArr, i)
+            fDir = array.get(fvgDirArr, i)
+            wasMit = array.get(fvgMitArr, i)
+            if not wasMit
+                // Bullish FVG fully closed through (close < bottom) → bearish IFVG
+                if fDir == 1 and close < fBot and close[1] >= fBot
+                    nb = box.new(bar_index, fTop, bar_index + ifvgExtend, fBot,
+                      bgcolor=colBearIFVG, border_color=color.new(#FF6F00, 30), border_width=1,
+                      text="IFVG", text_color=color.new(#FF6F00, 0), text_size=size.tiny, text_halign=text.align_left)
+                    array.push(ifvgBoxes, nb)
+                    array.push(ifvgTopArr, fTop)
+                    array.push(ifvgBotArr, fBot)
+                    array.push(ifvgDirArr, -1)  // now bearish
+                // Bearish FVG fully closed through (close > top) → bullish IFVG
+                if fDir == -1 and close > fTop and close[1] <= fTop
+                    nb = box.new(bar_index, fTop, bar_index + ifvgExtend, fBot,
+                      bgcolor=colBullIFVG, border_color=color.new(#7C4DFF, 30), border_width=1,
+                      text="IFVG", text_color=color.new(#7C4DFF, 0), text_size=size.tiny, text_halign=text.align_left)
+                    array.push(ifvgBoxes, nb)
+                    array.push(ifvgTopArr, fTop)
+                    array.push(ifvgBotArr, fBot)
+                    array.push(ifvgDirArr, 1)  // now bullish
+                // Cap rolling history
+                if array.size(ifvgBoxes) > 6
+                    box.delete(array.shift(ifvgBoxes))
+                    array.shift(ifvgTopArr)
+                    array.shift(ifvgBotArr)
+                    array.shift(ifvgDirArr)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · OTE ZONE FROM LATEST CONFIRMED SWING (Fib 0.62-0.79)
+// ══════════════════════════════════════════════════════════════════════════════
+
+var float oteSwingHigh = na
+var float oteSwingLow  = na
+var int   oteSwingBar  = 0
+var box   oteSwingBox  = na
+
+// Track latest swing — bullish swing = HH then HL retracement zone; bearish opposite
+if not na(lastSH) and lastSH != oteSwingHigh
+    oteSwingHigh := lastSH
+    oteSwingBar  := bar_index
+if not na(lastSL) and lastSL != oteSwingLow
+    oteSwingLow := lastSL
+    oteSwingBar := bar_index
+
+if showOTESwing and barstate.islast and not na(oteSwingHigh) and not na(oteSwingLow)
+    swingRange = oteSwingHigh - oteSwingLow
+    if swingRange > 0
+        if not na(oteSwingBox)
+            box.delete(oteSwingBox)
+        // For bullish trend: OTE on retracement DOWN from high (discount zone)
+        // For bearish trend: OTE on retracement UP from low (premium zone)
+        if trend == 1
+            oteHi = oteSwingLow + swingRange * oteFibHigh  // closer to high (entry)
+            oteLo = oteSwingLow + swingRange * oteFibLow   // deeper retrace
+            oteSwingBox := box.new(bar_index - 10, oteHi, bar_index + 20, oteLo,
+              bgcolor=colOTESwing, border_color=color.new(#FFEB3B, 50), border_width=1,
+              text="OTE LONG " + str.tostring(oteFibLow) + "-" + str.tostring(oteFibHigh), text_color=color.new(#FFEB3B, 0), text_size=size.tiny, text_halign=text.align_left)
+        else if trend == -1
+            oteHi = oteSwingHigh - swingRange * oteFibLow
+            oteLo = oteSwingHigh - swingRange * oteFibHigh
+            oteSwingBox := box.new(bar_index - 10, oteHi, bar_index + 20, oteLo,
+              bgcolor=colOTESwing, border_color=color.new(#FFEB3B, 50), border_width=1,
+              text="OTE SHORT " + str.tostring(oteFibLow) + "-" + str.tostring(oteFibHigh), text_color=color.new(#FFEB3B, 0), text_size=size.tiny, text_halign=text.align_left)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · NEWS BLACKOUT FILTER (suppress signals around scheduled high-impact events)
+// ══════════════════════════════════════════════════════════════════════════════
+
+inBlackout(string hhmm) =>
+    if str.length(hhmm) != 4
+        false
+    else
+        hh = math.round(str.tonumber(str.substring(hhmm, 0, 2)))
+        mm = math.round(str.tonumber(str.substring(hhmm, 2, 4)))
+        eventMin = hh * 60 + mm
+        // Convert current bar time to UTC minute-of-day
+        utcH = hour(time, "UTC")
+        utcM = minute(time, "UTC")
+        nowMin = utcH * 60 + utcM
+        // Within ± window minutes of event
+        delta = math.abs(nowMin - eventMin)
+        // Also account for wrap (e.g., event 0030 and now 2350 → delta 1400 but real is 40)
+        deltaWrap = 1440 - delta
+        actualDelta = math.min(delta, deltaWrap)
+        actualDelta <= newsBlackoutWindow
+
+newsBlackout = useNewsBlack and (inBlackout(newsTime1) or inBlackout(newsTime2) or inBlackout(newsTime3))
+
+bgcolor(useNewsBlack and showBlackoutBG and newsBlackout ? colBlackoutBG : na, title="News Blackout")
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · POWER OF 3 (AMD: Accumulation / Manipulation / Distribution)
+// ══════════════════════════════════════════════════════════════════════════════
+// Asia    = Accumulation (range builds, no directional commitment)
+// London  = Manipulation (sweep liquidity, often Judas swing reversal)
+// NY      = Distribution (true daily trend establishes)
+
+p3Phase = inAsianKZ ? "ACCUM (Asia)" : inLondonKZ ? "MANIP (London)" : inNYKZ ? "DISTRIB (NY)" : "INTER-KZ"
+p3Col   = inAsianKZ ? #FFEB3B : inLondonKZ ? #2196F3 : inNYKZ ? #00E676 : #757575
+
+if showP3 and barstate.islast
+    label.new(bar_index + 4, low, "P3: " + p3Phase, style=label.style_label_left, color=color.new(p3Col, 30), textcolor=color.white, size=size.small)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · HTF FVG (4H + Daily FVGs projected onto current chart)
+// ══════════════════════════════════════════════════════════════════════════════
+// Pulls high/low of FVG candles from higher TFs and draws them on the current TF.
+
+// Helper: request the last 3 bars high/low/close from HTF
+fvgFromHTF(string tf) =>
+    h1 = request.security(syminfo.tickerid, tf, high[1], barmerge.gaps_off, barmerge.lookahead_off)
+    h2 = request.security(syminfo.tickerid, tf, high[2], barmerge.gaps_off, barmerge.lookahead_off)
+    l0 = request.security(syminfo.tickerid, tf, low,    barmerge.gaps_off, barmerge.lookahead_off)
+    l1 = request.security(syminfo.tickerid, tf, low[1], barmerge.gaps_off, barmerge.lookahead_off)
+    l2 = request.security(syminfo.tickerid, tf, low[2], barmerge.gaps_off, barmerge.lookahead_off)
+    h0 = request.security(syminfo.tickerid, tf, high,   barmerge.gaps_off, barmerge.lookahead_off)
+    // Bullish FVG: low[0] > high[2]
+    bullGap = l0 > h2
+    bearGap = h0 < l2
+    [bullGap, bearGap, h2, l0, h0, l2]
+
+// Track HTF FVGs we've drawn to avoid duplicates
+var array<box> htf4hBullBoxes = array.new<box>()
+var array<box> htf4hBearBoxes = array.new<box>()
+var array<box> htfDBullBoxes  = array.new<box>()
+var array<box> htfDBearBoxes  = array.new<box>()
+var float lastHtf4hBullKey = na
+var float lastHtf4hBearKey = na
+var float lastHtfDBullKey  = na
+var float lastHtfDBearKey  = na
+
+if showHTF4H_FVG and barstate.isconfirmed
+    [bg, sg, h2_, l0_, h0_, l2_] = fvgFromHTF("240")
+    if bg and h2_ != lastHtf4hBullKey
+        lastHtf4hBullKey := h2_
+        nb = box.new(bar_index - 2, l0_, bar_index + htfFvgExtend, h2_,
+          bgcolor=colHTF4H_FVG_B, border_color=color.new(#00BFA5, 40), border_width=1,
+          text="4H FVG", text_color=color.new(#00BFA5, 0), text_size=size.tiny, text_halign=text.align_left)
+        array.push(htf4hBullBoxes, nb)
+        if array.size(htf4hBullBoxes) > 5
+            box.delete(array.shift(htf4hBullBoxes))
+    if sg and l2_ != lastHtf4hBearKey
+        lastHtf4hBearKey := l2_
+        nb = box.new(bar_index - 2, l2_, bar_index + htfFvgExtend, h0_,
+          bgcolor=colHTF4H_FVG_S, border_color=color.new(#FF5252, 40), border_width=1,
+          text="4H FVG", text_color=color.new(#FF5252, 0), text_size=size.tiny, text_halign=text.align_left)
+        array.push(htf4hBearBoxes, nb)
+        if array.size(htf4hBearBoxes) > 5
+            box.delete(array.shift(htf4hBearBoxes))
+
+if showHTFD_FVG and barstate.isconfirmed
+    [bg, sg, h2_, l0_, h0_, l2_] = fvgFromHTF("D")
+    if bg and h2_ != lastHtfDBullKey
+        lastHtfDBullKey := h2_
+        nb = box.new(bar_index - 2, l0_, bar_index + htfFvgExtend, h2_,
+          bgcolor=colHTFD_FVG_B, border_color=color.new(#1DE9B6, 30), border_width=2,
+          text="D FVG", text_color=color.new(#1DE9B6, 0), text_size=size.small, text_halign=text.align_left)
+        array.push(htfDBullBoxes, nb)
+        if array.size(htfDBullBoxes) > 4
+            box.delete(array.shift(htfDBullBoxes))
+    if sg and l2_ != lastHtfDBearKey
+        lastHtfDBearKey := l2_
+        nb = box.new(bar_index - 2, l2_, bar_index + htfFvgExtend, h0_,
+          bgcolor=colHTFD_FVG_S, border_color=color.new(#FF1744, 30), border_width=2,
+          text="D FVG", text_color=color.new(#FF1744, 0), text_size=size.small, text_halign=text.align_left)
+        array.push(htfDBearBoxes, nb)
+        if array.size(htfDBearBoxes) > 4
+            box.delete(array.shift(htfDBearBoxes))
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · LIQUIDITY VOIDS (extreme imbalance candles > N × ATR)
+// ══════════════════════════════════════════════════════════════════════════════
+
+var array<box> voidBoxes = array.new<box>()
+
+if showVoid and barstate.isconfirmed and not na(atrVal)
+    barRange = high - low
+    isBigBull = close > open and barRange > atrVal * voidAtrMult
+    isBigBear = close < open and barRange > atrVal * voidAtrMult
+    if isBigBull
+        nb = box.new(bar_index, high, bar_index + voidExtend, low,
+          bgcolor=colBullVoid, border_color=color.new(#80DEEA, 40), border_width=1,
+          text="VOID", text_color=color.new(#80DEEA, 0), text_size=size.tiny, text_halign=text.align_left)
+        array.push(voidBoxes, nb)
+        if array.size(voidBoxes) > 8
+            box.delete(array.shift(voidBoxes))
+    if isBigBear
+        nb = box.new(bar_index, high, bar_index + voidExtend, low,
+          bgcolor=colBearVoid, border_color=color.new(#FFAB91, 40), border_width=1,
+          text="VOID", text_color=color.new(#FFAB91, 0), text_size=size.tiny, text_halign=text.align_left)
+        array.push(voidBoxes, nb)
+        if array.size(voidBoxes) > 8
+            box.delete(array.shift(voidBoxes))
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · MITIGATION BLOCKS (origin of clean impulse — price retest expected)
+// ══════════════════════════════════════════════════════════════════════════════
+// A mitigation block is the candle that started a clean directional impulse
+// (multiple consecutive candles in same direction, no retest).
+// Price often returns to "mitigate" before continuing.
+
+var array<box> bullMitBoxes = array.new<box>()
+var array<box> bearMitBoxes = array.new<box>()
+var array<float> bullMitTops = array.new_float()
+var array<float> bullMitBots = array.new_float()
+var array<float> bearMitTops = array.new_float()
+var array<float> bearMitBots = array.new_float()
+
+if showMit and barstate.isconfirmed and not na(atrVal)
+    // Look back 3 bars for an impulse pattern: candle 3 ago = origin, candles 2,1,0 = impulse
+    move = math.abs(close - close[3])
+    bigImpulse = move > atrVal * mitMinImpulse
+    sameDirection = (close > close[1] and close[1] > close[2] and close[2] > close[3]) or (close < close[1] and close[1] < close[2] and close[2] < close[3])
+    if bigImpulse and sameDirection
+        // Bullish mitigation: origin candle (3 bars ago) is the mit block
+        if close > close[3]
+            mitTop = math.max(open[3], close[3])
+            mitBot = math.min(open[3], close[3])
+            nb = box.new(bar_index - 3, mitTop, bar_index + mitExtend, mitBot,
+              bgcolor=colBullMit, border_color=color.new(#AB47BC, 40), border_width=1,
+              text="MIT", text_color=color.new(#AB47BC, 0), text_size=size.tiny, text_halign=text.align_left)
+            array.push(bullMitBoxes, nb)
+            array.push(bullMitTops, mitTop)
+            array.push(bullMitBots, mitBot)
+            if array.size(bullMitBoxes) > 6
+                box.delete(array.shift(bullMitBoxes))
+                array.shift(bullMitTops)
+                array.shift(bullMitBots)
+        else
+            mitTop = math.max(open[3], close[3])
+            mitBot = math.min(open[3], close[3])
+            nb = box.new(bar_index - 3, mitTop, bar_index + mitExtend, mitBot,
+              bgcolor=colBearMit, border_color=color.new(#FFA726, 40), border_width=1,
+              text="MIT", text_color=color.new(#FFA726, 0), text_size=size.tiny, text_halign=text.align_left)
+            array.push(bearMitBoxes, nb)
+            array.push(bearMitTops, mitTop)
+            array.push(bearMitBots, mitBot)
+            if array.size(bearMitBoxes) > 6
+                box.delete(array.shift(bearMitBoxes))
+                array.shift(bearMitTops)
+                array.shift(bearMitBots)
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V6 · STACKED CONFLUENCE ZONES (count overlapping structures at current price)
+// ══════════════════════════════════════════════════════════════════════════════
+// Counts how many V5/V6 structures (OB, FVG, Breaker, IFVG, Mitigation) overlap
+// near the current price. When count >= stackMinCount, flag the zone.
+
+countStackedAt(float price) =>
+    int cnt = 0
+    if array.size(obTopArr) > 0
+        for i = 0 to array.size(obTopArr) - 1
+            if price <= array.get(obTopArr, i) and price >= array.get(obBotArr, i)
+                if not array.get(obMitArr, i)
+                    cnt := cnt + 1
+    if array.size(fvgTopArr) > 0
+        for i = 0 to array.size(fvgTopArr) - 1
+            if price <= array.get(fvgTopArr, i) and price >= array.get(fvgBotArr, i)
+                if not array.get(fvgMitArr, i)
+                    cnt := cnt + 1
+    if array.size(ifvgTopArr) > 0
+        for i = 0 to array.size(ifvgTopArr) - 1
+            if price <= array.get(ifvgTopArr, i) and price >= array.get(ifvgBotArr, i)
+                cnt := cnt + 1
+    if array.size(bullBreakerTops) > 0
+        for i = 0 to array.size(bullBreakerTops) - 1
+            if price <= array.get(bullBreakerTops, i) and price >= array.get(bullBreakerBots, i)
+                cnt := cnt + 1
+    if array.size(bearBreakerTops) > 0
+        for i = 0 to array.size(bearBreakerTops) - 1
+            if price <= array.get(bearBreakerTops, i) and price >= array.get(bearBreakerBots, i)
+                cnt := cnt + 1
+    if array.size(bullMitTops) > 0
+        for i = 0 to array.size(bullMitTops) - 1
+            if price <= array.get(bullMitTops, i) and price >= array.get(bullMitBots, i)
+                cnt := cnt + 1
+    if array.size(bearMitTops) > 0
+        for i = 0 to array.size(bearMitTops) - 1
+            if price <= array.get(bearMitTops, i) and price >= array.get(bearMitBots, i)
+                cnt := cnt + 1
+    cnt
+
+stackedCount = showStackZones ? countStackedAt(close) : 0
+stackedFlag  = stackedCount >= stackMinCount
+
+if showStackZones and stackedFlag and barstate.islast
+    label.new(bar_index + 2, close, "STACK ×" + str.tostring(stackedCount), style=label.style_label_left, color=color.new(#FFD600, 30), textcolor=color.black, size=size.small)
+bgcolor(showStackZones and stackedFlag ? colStackZone : na, title="Stacked Confluence Zone")
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(bosUp, "Bullish BOS", "Bullish Break of Structure detected")
+alertcondition(bosDn, "Bearish BOS", "Bearish Break of Structure detected")
+alertcondition(chochUp, "Bullish CHoCH", "Bullish Change of Character detected")
+alertcondition(chochDn, "Bearish CHoCH", "Bearish Change of Character detected")
+alertcondition(liqSweepUp, "Liquidity Sweep High", "Liquidity swept above equal highs")
+alertcondition(liqSweepDn, "Liquidity Sweep Low", "Liquidity swept below equal lows")
+alertcondition(sqzOn and not sqzOn[1], "Squeeze Started", "Bollinger Squeeze detected")
+alertcondition(inducementUp, "Bullish Inducement", "Bullish inducement detected — fake breakdown reversed")
+alertcondition(inducementDn, "Bearish Inducement", "Bearish inducement detected — fake breakout reversed")
+alertcondition(bullConf >= 6, "High Bull Confluence", "Bullish confluence >= 6/10 — strong setup forming")
+alertcondition(bearConf >= 6, "High Bear Confluence", "Bearish confluence >= 6/10 — strong setup forming")
+alertcondition(lastSignal == "LONG" and lastSignal[1] != "LONG", "LONG Signal", "LONG entry signal with confluence")
+alertcondition(lastSignal == "SHORT" and lastSignal[1] != "SHORT", "SHORT Signal", "SHORT entry signal with confluence")
+alertcondition(stackOk and not stackOk[1], "Stack OK", "Safe to stack positions — volume + direction + no range")
+alertcondition(not stackOk and stackOk[1], "Stack OFF", "Stop stacking — conditions degraded")
+
+// V6 alerts
+alertcondition(useVixFilter and vixHigh and not vixHigh[1], "VIX Stress ON", "VIX crossed above threshold — risk-off regime")
+alertcondition(useVixFilter and not vixHigh and vixHigh[1], "VIX Stress OFF", "VIX dropped below threshold — calm returning")
+alertcondition(useVixFilter and vixCalm and not vixCalm[1], "VIX Complacent", "VIX < 15 — late-cycle complacency, contrarian top warning")
+alertcondition(inLondonKZ and not inLondonKZ[1], "London KZ Open", "London killzone opening (14:00 UTC+7)")
+alertcondition(inNYKZ and not inNYKZ[1], "NY KZ Open", "NY killzone opening — PRIME (19:00 UTC+7)")
+alertcondition(showVwapDaily and ta.crossover(close, vwapDay), "Cross above Daily VWAP", "Price crossed ABOVE the daily VWAP — bullish bias")
+alertcondition(showVwapDaily and ta.crossunder(close, vwapDay), "Cross below Daily VWAP", "Price crossed BELOW the daily VWAP — bearish bias")
+alertcondition(showVwapWeekly and ta.crossover(close, vwapWeek), "Cross above Weekly VWAP", "Price reclaimed Weekly VWAP — higher-TF bullish")
+alertcondition(showVwapWeekly and ta.crossunder(close, vwapWeek), "Cross below Weekly VWAP", "Price lost Weekly VWAP — higher-TF bearish")
+
+// V6 — MTF / IFVG / OTE / News / Power-of-3 alerts
+alertcondition(useMTFBias and mtfAligned and mtfSum > 0 and mtfSum[1] < 4, "MTF Aligned BULL", "Daily + 4H + 1H + Current all bullish — strongest possible alignment")
+alertcondition(useMTFBias and mtfAligned and mtfSum < 0 and mtfSum[1] > -4, "MTF Aligned BEAR", "Daily + 4H + 1H + Current all bearish — strongest possible alignment")
+alertcondition(useMTFBias and mtfStronglyAligned and not mtfStronglyAligned[1], "MTF Strong Alignment", "3 of 4 timeframes aligned — strong directional bias")
+alertcondition(showIFVG and array.size(ifvgBoxes) > array.size(ifvgBoxes)[1], "New IFVG Detected", "An FVG inverted — new opposite-direction resistance/support formed")
+alertcondition(useNewsBlack and newsBlackout and not newsBlackout[1], "News Blackout ENTER", "Entering news blackout window — avoid new entries")
+alertcondition(useNewsBlack and not newsBlackout and newsBlackout[1], "News Blackout EXIT", "News blackout window cleared — trading allowed again")
+alertcondition(showP3 and inLondonKZ and not inLondonKZ[1], "P3 MANIPULATION starts", "London phase = MANIPULATION (Judas swing risk)")
+alertcondition(showP3 and inNYKZ and not inNYKZ[1], "P3 DISTRIBUTION starts", "NY phase = DISTRIBUTION (true daily trend establishes)")
+
+// V6 — HTF FVG / Voids / Mitigation / Stacked alerts
+alertcondition(showHTF4H_FVG and array.size(htf4hBullBoxes) > array.size(htf4hBullBoxes)[1], "New 4H Bull FVG", "A new bullish FVG formed on the 4H timeframe")
+alertcondition(showHTF4H_FVG and array.size(htf4hBearBoxes) > array.size(htf4hBearBoxes)[1], "New 4H Bear FVG", "A new bearish FVG formed on the 4H timeframe")
+alertcondition(showHTFD_FVG and array.size(htfDBullBoxes) > array.size(htfDBullBoxes)[1], "New Daily Bull FVG", "A new bullish FVG formed on the Daily timeframe — high impact")
+alertcondition(showHTFD_FVG and array.size(htfDBearBoxes) > array.size(htfDBearBoxes)[1], "New Daily Bear FVG", "A new bearish FVG formed on the Daily timeframe — high impact")
+alertcondition(showVoid and array.size(voidBoxes) > array.size(voidBoxes)[1], "Liquidity Void", "Extreme imbalance candle detected — price moves fast, expect retrace")
+alertcondition(showMit and array.size(bullMitBoxes) > array.size(bullMitBoxes)[1], "Bullish Mitigation Block", "Clean bullish impulse — mitigation block formed at origin")
+alertcondition(showMit and array.size(bearMitBoxes) > array.size(bearMitBoxes)[1], "Bearish Mitigation Block", "Clean bearish impulse — mitigation block formed at origin")
+alertcondition(showStackZones and stackedFlag and not stackedFlag[1], "Stacked Confluence Zone", "Multiple structures overlap at current price — high-probability reaction zone")
