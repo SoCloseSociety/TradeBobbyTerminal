@@ -1,0 +1,19 @@
+{
+  "name": "scalp",
+  "description": "Intraday quick trades, killzone-only, tight stops",
+  "risk_per_trade_pct": 0.5,
+  "min_rr": 1.5,
+  "max_positions": 5,
+  "min_confluence": 5,
+  "preferred_killzones": ["london", "ny-overlap"],
+  "preferred_timeframes": ["60", "15"],
+  "max_sl_atr_mult": 1.2,
+  "max_hold_bars": 12,
+  "block_when": {
+    "vix_above": 28,
+    "news_blackout": true
+  },
+  "favored_setups": ["liquidity_sweep", "FVG", "OB", "OTE"],
+  "avoid_assets": ["XAGUSD", "USOIL"],
+  "notes": "Scalp profile: high-frequency, tight risk, exit fast. Asia killzone forbidden."
+}

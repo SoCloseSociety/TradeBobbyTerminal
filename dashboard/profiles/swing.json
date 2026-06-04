@@ -1,0 +1,19 @@
+{
+  "name": "swing",
+  "description": "Multi-day positions on Daily/4H setups, wider stops, ride trends",
+  "risk_per_trade_pct": 1.0,
+  "min_rr": 2.5,
+  "max_positions": 3,
+  "min_confluence": 6,
+  "preferred_killzones": ["any"],
+  "preferred_timeframes": ["240", "D"],
+  "max_sl_atr_mult": 2.5,
+  "max_hold_bars": 80,
+  "block_when": {
+    "vix_above": 35,
+    "news_blackout": false
+  },
+  "favored_setups": ["HTF_FVG", "Daily_OB", "MTF_aligned", "OTE"],
+  "avoid_assets": [],
+  "notes": "Swing profile: patience-first, ride HTF trend. Hold through news events."
+}

@@ -33,7 +33,7 @@ else fail "dashboard HTTP fail"; fi
 
 echo ""
 echo "── 3. API endpoints (24) ──"
-for ep in scan macro-pulse crypto-pulse cot onchain-btc earnings news currency-strength reddit-mania trade-brief sentiment-history setup-stats setup-history pending-alerts calendar broker setups alerts macro correlations scan-history feedback health daily-brief.md; do
+for ep in scan macro-pulse crypto-pulse cot onchain-btc earnings news currency-strength reddit-mania trade-brief sentiment-history setup-stats setup-history pending-alerts calendar broker setups alerts macro correlations scan-history feedback health daily-brief.md etf-flows backtest-report pattern-insights claude-narrative profiles weekly-brief.md backtest-report.md; do
   code=$(curl -sf -o /dev/null -w "%{http_code}" -m 5 "http://localhost:3333/api/$ep")
   if [ "$code" = "200" ] || [ "$code" = "404" ]; then ok "/api/$ep ($code)"
   else fail "/api/$ep returned $code"; fi

@@ -236,6 +236,53 @@ app.post('/api/feedback', (req, res) => {
   res.json({ ok: true, count: fb.notes.length });
 });
 
+// ── PROFILES ──
+app.get('/api/profiles', (req, res) => {
+  const dir = join(__dirname, 'profiles');
+  if (!existsSync(dir)) return res.json({ profiles: [], active: null });
+  const files = ['scalp.json', 'swing.json', 'aggressive.json', 'conservative.json'];
+  const profiles = files
+    .map(f => { try { return readJSON(join(dir, f)); } catch { return null; } })
+    .filter(Boolean);
+  res.json({ profiles, active: req.query.active || null });
+});
+
+// ── ETF FLOWS (Phase 7) ──
+app.get('/api/etf-flows', (req, res) => {
+  res.json(readJSON(join(__dirname, 'etf_flows.json')) || { etfs: {}, note: 'Run: node etf-flows.js' });
+});
+
+// ── BACKTEST REPORT (Phase 6) ──
+app.get('/api/backtest-report', (req, res) => {
+  res.json(readJSON(join(__dirname, 'backtest_report.json')) || { note: 'Run: node backtester.js' });
+});
+
+// ── PATTERN INSIGHTS (Phase 8) ──
+app.get('/api/pattern-insights', (req, res) => {
+  res.json(readJSON(join(__dirname, 'pattern_insights.json')) || { note: 'Run: node pattern-analyzer.js' });
+});
+
+// ── CLAUDE NARRATIVE (Phase 13) ──
+app.get('/api/claude-narrative', (req, res) => {
+  res.json(readJSON(join(__dirname, 'claude_narrative.json')) || { note: 'Run: node claude-narrator.js' });
+});
+
+// ── WEEKLY BRIEF MD (Phase 5) ──
+app.get('/api/weekly-brief.md', (req, res) => {
+  const path = join(__dirname, 'weekly_brief.md');
+  if (!existsSync(path)) return res.status(404).send('# Not generated yet\nRun: node weekly-brief.js');
+  res.set('Content-Type', 'text/markdown');
+  res.send(readFileSync(path, 'utf8'));
+});
+
+// ── BACKTEST REPORT MD (Phase 6) ──
+app.get('/api/backtest-report.md', (req, res) => {
+  const path = join(__dirname, 'backtest_report.md');
+  if (!existsSync(path)) return res.status(404).send('# Not generated yet\nRun: node backtester.js');
+  res.set('Content-Type', 'text/markdown');
+  res.send(readFileSync(path, 'utf8'));
+});
+
 // ── HEALTH / STATUS ──
 app.get('/api/health', (req, res) => {
   const now = Date.now();

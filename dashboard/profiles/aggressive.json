@@ -1,0 +1,19 @@
+{
+  "name": "aggressive",
+  "description": "High risk per trade, take any decent setup, trade often",
+  "risk_per_trade_pct": 2.0,
+  "min_rr": 1.5,
+  "max_positions": 7,
+  "min_confluence": 4,
+  "preferred_killzones": ["any"],
+  "preferred_timeframes": ["240", "60", "15"],
+  "max_sl_atr_mult": 3.0,
+  "max_hold_bars": 50,
+  "block_when": {
+    "vix_above": 40,
+    "news_blackout": false
+  },
+  "favored_setups": ["any"],
+  "avoid_assets": [],
+  "notes": "Aggressive profile: maximize occurrences, accept lower selectivity. Watch VIX carefully."
+}

@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-06-04T21:37:06.796Z",
+  "period": {
+    "scans": 1,
+    "setups": 0,
+    "sentiment_snapshots": 96,
+    "first_scan": "2026-04-24T08:10:46.892Z",
+    "last_scan": "2026-04-24T08:10:46.892Z"
+  },
+  "symbol_returns": {},
+  "symbol_volatility": {},
+  "setups_breakdown": {
+    "total": 0,
+    "closed": 0,
+    "open": 0,
+    "by_outcome": {}
+  },
+  "by_quality": {},
+  "by_symbol": {},
+  "sentiment_period": {
+    "risk_delta": 13,
+    "vix_delta": -0.7000000000000011,
+    "fg_delta": 1,
+    "first_label": "CAUTIOUS",
+    "last_label": "NEUTRAL"
+  },
+  "best_performers": [],
+  "worst_performers": []
+}

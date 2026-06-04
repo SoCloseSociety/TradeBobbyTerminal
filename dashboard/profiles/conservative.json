@@ -1,0 +1,21 @@
+{
+  "name": "conservative",
+  "description": "Only A+ setups, full alignment required, kill mode if VIX > 22",
+  "risk_per_trade_pct": 0.5,
+  "min_rr": 3.0,
+  "max_positions": 2,
+  "min_confluence": 8,
+  "preferred_killzones": ["ny-overlap"],
+  "preferred_timeframes": ["D", "240"],
+  "max_sl_atr_mult": 1.5,
+  "max_hold_bars": 100,
+  "block_when": {
+    "vix_above": 22,
+    "news_blackout": true,
+    "require_mtf_aligned": true,
+    "require_stacked_confluence": 3
+  },
+  "favored_setups": ["Stacked_Confluence", "HTF_FVG", "MTF_aligned", "OTE_with_OB"],
+  "avoid_assets": ["XAGUSD", "USOIL", "BTCUSD"],
+  "notes": "Conservative profile: capital preservation first. Take only the BEST setups, skip the rest."
+}
