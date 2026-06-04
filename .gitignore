@@ -63,6 +63,7 @@ dashboard/legacy/backtest_results.json
 dashboard/legacy/broker_positions.json
 dashboard/legacy/broker-ctrader-tokens.json
 dashboard/legacy/paper_portfolio.json
+dashboard/weekly_brief.md
 sessions/
 CLAUDE.md
 MARGIN_STRATEGY.md
