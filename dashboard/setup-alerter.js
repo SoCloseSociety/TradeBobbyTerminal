@@ -31,6 +31,59 @@ function notifyMac(title, message) {
     (err) => { if (err) log('  ⚠ osascript: ' + err.message); });
 }
 
+// Discord webhook (opt-in via env var DISCORD_WEBHOOK_URL)
+async function notifyDiscord(alert) {
+  const url = process.env.DISCORD_WEBHOOK_URL;
+  if (!url) return;
+  const color = alert.quality === 'A+' ? 0x00E676 : alert.quality === 'A' ? 0x4CAF50 : 0xFFB800;
+  const dirEmoji = alert.direction === 'LONG' ? '📈' : '📉';
+  const body = {
+    username: 'TradeBobby',
+    embeds: [{
+      title: `${dirEmoji} ${alert.quality || 'A'} ${alert.direction} ${alert.symbol}`,
+      color,
+      fields: [
+        { name: 'Entry', value: String(alert.entry), inline: true },
+        { name: 'SL', value: String(alert.sl), inline: true },
+        { name: 'TP2', value: String(alert.tp2 || alert.tp1 || '—'), inline: true },
+        { name: 'R:R', value: String(alert.rr || '?'), inline: true },
+        { name: 'Score', value: String(alert.score || '?'), inline: true },
+        { name: 'Reasons', value: (alert.reasons || []).slice(0, 3).join(' · ') || '—' }
+      ],
+      timestamp: alert.timestamp
+    }]
+  };
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) log(`  ⚠ Discord webhook ${r.status}`);
+  } catch (e) {
+    log('  ⚠ Discord webhook error: ' + e.message);
+  }
+}
+
+// Telegram bot (opt-in via env TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
+async function notifyTelegram(alert) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+  const dirEmoji = alert.direction === 'LONG' ? '📈' : '📉';
+  const text = `${dirEmoji} *${alert.quality || 'A'} ${alert.direction} ${alert.symbol}*\n`
+    + `Entry: \`${alert.entry}\`  SL: \`${alert.sl}\`  TP: \`${alert.tp2 || alert.tp1 || '—'}\`\n`
+    + `R:R ${alert.rr || '?'}  Score ${alert.score || '?'}\n`
+    + `${(alert.reasons || []).slice(0, 3).join(' · ')}`;
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
+    });
+    if (!r.ok) log(`  ⚠ Telegram ${r.status}`);
+  } catch (e) {
+    log('  ⚠ Telegram error: ' + e.message);
+  }
+}
+
 function makeId(s) {
   return `${s.symbol}_${s.direction}_${Math.round(s.entry * 1000)}_${s.quality||''}`;
 }
@@ -63,7 +116,7 @@ async function run() {
     const msg = `Entry ${s.entry} · SL ${s.sl} · TP2 ${s.tp2||s.tp} · R:R ${s.rr||'?'} · Score ${s.score||'?'}`;
     log(`🚨 ALERT: ${title} — ${msg}`);
     notifyMac(title, msg);
-    newAlerts.push({
+    const alert = {
       id,
       timestamp: new Date().toISOString(),
       symbol: s.symbol,
@@ -77,7 +130,11 @@ async function run() {
       rr: s.rr,
       reasons: s.reasons,
       message: `${title} · ${msg}`
-    });
+    };
+    newAlerts.push(alert);
+    // Fire optional webhooks (no-op if env vars unset)
+    notifyDiscord(alert);
+    notifyTelegram(alert);
   }
 
   // Persist state

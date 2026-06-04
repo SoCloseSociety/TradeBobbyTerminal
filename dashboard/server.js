@@ -1,6 +1,6 @@
 // TradeBobby Dashboard v2 — with tooltips, feedback, manual trades
 import express from 'express';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -234,6 +234,43 @@ app.post('/api/feedback', (req, res) => {
   });
   writeJSON(FEEDBACK_PATH, fb);
   res.json({ ok: true, count: fb.notes.length });
+});
+
+// ── HEALTH / STATUS ──
+app.get('/api/health', (req, res) => {
+  const now = Date.now();
+  const sources = [
+    { key: 'scan',     file: SCAN_PATH,                                stale_ms: 4 * 3600 * 1000 },
+    { key: 'macro',    file: join(__dirname, 'macro_pulse.json'),      stale_ms: 30 * 60 * 1000 },
+    { key: 'crypto',   file: join(__dirname, 'crypto_pulse.json'),     stale_ms: 30 * 60 * 1000 },
+    { key: 'news',     file: join(__dirname, 'news_feed.json'),        stale_ms: 60 * 60 * 1000 },
+    { key: 'cot',      file: join(__dirname, 'cot.json'),              stale_ms: 7 * 24 * 3600 * 1000 },
+    { key: 'onchain',  file: join(__dirname, 'onchain_btc.json'),      stale_ms: 60 * 60 * 1000 },
+    { key: 'earnings', file: join(__dirname, 'earnings_cal.json'),     stale_ms: 24 * 3600 * 1000 },
+    { key: 'reddit',   file: join(__dirname, 'reddit_mania.json'),     stale_ms: 2 * 60 * 60 * 1000 },
+    { key: 'currency', file: join(__dirname, 'currency_strength.json'),stale_ms: 30 * 60 * 1000 },
+    { key: 'cal',      file: join(__dirname, 'econ_calendar.json'),    stale_ms: 24 * 3600 * 1000 },
+    { key: 'brief',    file: join(__dirname, 'trade_brief.json'),      stale_ms: 30 * 60 * 1000 },
+    { key: 'sentiment',file: join(__dirname, 'sentiment_history.json'),stale_ms: 30 * 60 * 1000 }
+  ];
+  const status = { ok: true, timestamp: new Date().toISOString(), uptime_sec: Math.round(process.uptime()), sources: {}, summary: { ok: 0, stale: 0, missing: 0 } };
+  for (const s of sources) {
+    if (!existsSync(s.file)) {
+      status.sources[s.key] = { ok: false, missing: true };
+      status.summary.missing++;
+      continue;
+    }
+    const stat = readJSON(s.file);
+    const mtime = existsSync(s.file) ? (now - Date.parse(JSON.parse(readFileSync(s.file, 'utf8'))?.timestamp || 0)) : Infinity;
+    const fileMTime = now - (statSync ? statSync(s.file).mtimeMs : mtime);
+    const age = isFinite(mtime) ? mtime : fileMTime;
+    const stale = age > s.stale_ms;
+    status.sources[s.key] = { ok: !stale, age_ms: age, stale };
+    if (stale) status.summary.stale++;
+    else status.summary.ok++;
+  }
+  status.ok = status.summary.missing === 0 && status.summary.stale < 3;
+  res.json(status);
 });
 
 // ── DASHBOARD HTML ──
