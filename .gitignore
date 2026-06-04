@@ -57,6 +57,12 @@ legacy/broker_positions.json
 # ── Personal data (do NOT commit) ──
 dashboard/feedback.json
 dashboard/macro_context.json
+dashboard/real_trades.json
+dashboard/performance.json
+dashboard/legacy/backtest_results.json
+dashboard/legacy/broker_positions.json
+dashboard/legacy/broker-ctrader-tokens.json
+dashboard/legacy/paper_portfolio.json
 sessions/
 CLAUDE.md
 MARGIN_STRATEGY.md
