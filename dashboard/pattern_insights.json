@@ -1,6 +1,0 @@
-{
-  "timestamp": "2026-06-04T21:39:43.181Z",
-  "setups_analyzed": 0,
-  "insights": {},
-  "note": "Insufficient data — need ≥5 closed setups for meaningful patterns (have 0). Run setup-tracker daemon during active scans to accumulate."
-}
