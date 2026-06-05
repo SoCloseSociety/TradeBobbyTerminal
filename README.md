@@ -522,7 +522,7 @@ This is research software. **Use at your own risk.** Past performance does not g
 
 <div align="center">
 
-**Built with ❤️ by [SoCloseSociety](https://github.com/SoCloseSociety) in Koh Samui, Thailand.**
+**Built with ❤️ by [SoCloseSociety](https://github.com/SoCloseSociety) **
 
 Made for the trader who wants Bloomberg density without the $25k/year terminal.
 
