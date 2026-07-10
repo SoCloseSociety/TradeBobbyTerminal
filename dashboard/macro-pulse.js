@@ -3,10 +3,9 @@
 // One-shot: node macro-pulse.js
 // Daemon (every 5min): node macro-pulse.js --daemon
 
-import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic, readJsonSafe } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'macro_pulse.json');
@@ -72,7 +71,7 @@ const TICKERS = [
 async function fetchYahoo(ticker) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=5m`;
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const j = await r.json();
     const meta = j?.chart?.result?.[0]?.meta;
@@ -93,7 +92,12 @@ async function run() {
   log('🔄 Fetching macro pulse...');
   const out = { timestamp: new Date().toISOString(), data: {} };
   for (const t of TICKERS) {
-    const d = await fetchYahoo(t.y);
+    let d = await fetchYahoo(t.y);
+    if (!d) {
+      // One retry after a pause -- Yahoo rate-limits bursts, most failures are transient.
+      await new Promise(r => setTimeout(r, 2000));
+      d = await fetchYahoo(t.y);
+    }
     if (d) {
       out.data[t.k] = { ...d, label: t.label, unit: t.unit };
     } else {
@@ -101,6 +105,20 @@ async function run() {
     }
     // Light throttle to be polite
     await new Promise(r => setTimeout(r, 150));
+  }
+
+  // Last-known-good merge: keep tickers from the previous file that failed this cycle,
+  // so a transient Yahoo outage does not wipe good data.
+  const prev = readJsonSafe(OUT);
+  if (prev?.data) {
+    let carried = 0;
+    for (const t of TICKERS) {
+      if (!out.data[t.k] && prev.data[t.k]) {
+        out.data[t.k] = { ...prev.data[t.k], stale: true };
+        carried++;
+      }
+    }
+    if (carried > 0) log(`  ♻ carried ${carried} ticker(s) from previous run`);
   }
 
   // Derived metrics
@@ -164,7 +182,7 @@ async function run() {
     risk_off_score: sectors.filter(s => ['xlu','xlp','xlv'].includes(s.key)).reduce((acc, s) => acc + (s.chg || 0), 0)
   };
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   const tickers = Object.keys(out.data).length;
   log(`✅ Wrote ${tickers} tickers · vol=${volRegime} · curve=${out.regime.yield_curve || '—'}`);
   return out;

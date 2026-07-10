@@ -41,9 +41,10 @@ done
 
 echo ""
 echo "── 4. Daemons running ──"
-DAEMONS=(macro-pulse crypto-pulse cot-fetcher onchain-btc earnings-cal setup-tracker currency-strength reddit-mania setup-alerter trade-agent)
+DAEMONS=(macro-pulse crypto-pulse orderflow-crypto news-scanner cot-fetcher onchain-btc earnings-cal setup-tracker currency-strength reddit-mania setup-alerter trade-agent etf-flows claude-narrator tts-narrator weekly-brief)
 for d in "${DAEMONS[@]}"; do
-  if ps -ax -o command | grep -q "node $d.js --daemon" 2>/dev/null; then ok "daemon $d"
+  # pgrep -f self-excludes; ps|grep matched its own grep line and always passed
+  if pgrep -f "node $d.js --daemon" >/dev/null 2>&1; then ok "daemon $d"
   else fail "daemon $d not running"; fi
 done
 

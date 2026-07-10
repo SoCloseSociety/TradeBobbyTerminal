@@ -7,21 +7,17 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3333', 10);
 const app = express();
-app.use(express.json());
-// Handle malformed JSON gracefully
-app.use((err, req, res, next) => {
-  if (err.type === 'entity.parse.failed') {
-    return res.status(400).json({ ok: false, error: 'invalid JSON' });
-  }
-  next(err);
-});
+app.use(express.json({ limit: '32kb' }));
 
 const SCAN_PATH = join(__dirname, 'last_scan.json');
 const FEEDBACK_PATH = join(__dirname, 'feedback.json');
 
 function readJSON(path) {
   if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, 'utf8'));
+  // Tolerate corrupt/partially-written JSON: a read during a non-atomic writeFileSync
+  // would otherwise throw a SyntaxError that 500s the route and leaks a stack trace.
+  // Returning null lets each route's `|| {fallback}` degrade gracefully.
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
 }
 function writeJSON(path, data) {
   writeFileSync(path, JSON.stringify(data, null, 2));
@@ -123,6 +119,10 @@ app.get('/api/trade-brief', (req, res) => {
 
 app.get('/api/sentiment-history', (req, res) => {
   res.json(readJSON(join(__dirname, 'sentiment_history.json')) || { snapshots: [] });
+});
+
+app.get('/api/orderflow', (req, res) => {
+  res.json(readJSON(join(__dirname, 'orderflow_crypto.json')) || { symbols: [], note: 'Run: node orderflow-crypto.js' });
 });
 
 app.get('/api/daily-brief.md', (req, res) => {
@@ -298,7 +298,8 @@ app.get('/api/health', (req, res) => {
     { key: 'currency', file: join(__dirname, 'currency_strength.json'),stale_ms: 30 * 60 * 1000 },
     { key: 'cal',      file: join(__dirname, 'econ_calendar.json'),    stale_ms: 24 * 3600 * 1000 },
     { key: 'brief',    file: join(__dirname, 'trade_brief.json'),      stale_ms: 30 * 60 * 1000 },
-    { key: 'sentiment',file: join(__dirname, 'sentiment_history.json'),stale_ms: 30 * 60 * 1000 }
+    { key: 'sentiment',file: join(__dirname, 'sentiment_history.json'),stale_ms: 30 * 60 * 1000 },
+    { key: 'orderflow',file: join(__dirname, 'orderflow_crypto.json'),  stale_ms: 10 * 60 * 1000 }
   ];
   const status = { ok: true, timestamp: new Date().toISOString(), uptime_sec: Math.round(process.uptime()), sources: {}, summary: { ok: 0, stale: 0, missing: 0 } };
   for (const s of sources) {
@@ -308,9 +309,11 @@ app.get('/api/health', (req, res) => {
       continue;
     }
     const stat = readJSON(s.file);
-    const mtime = existsSync(s.file) ? (now - Date.parse(JSON.parse(readFileSync(s.file, 'utf8'))?.timestamp || 0)) : Infinity;
-    const fileMTime = now - (statSync ? statSync(s.file).mtimeMs : mtime);
-    const age = isFinite(mtime) ? mtime : fileMTime;
+    // Age from the JSON's own `timestamp` when present & valid; else fall back to file mtime.
+    // (Date.parse(0) ~= year 2000 made timestamp-less files like sentiment_history.json read
+    //  as ~26y stale forever; the mtime fallback fixes that.)
+    const tsParsed = stat?.timestamp ? Date.parse(stat.timestamp) : NaN;
+    const age = Number.isFinite(tsParsed) ? (now - tsParsed) : (now - statSync(s.file).mtimeMs);
     const stale = age > s.stale_ms;
     status.sources[s.key] = { ok: !stale, age_ms: age, stale };
     if (stale) status.summary.stale++;
@@ -562,6 +565,7 @@ const HTML = `<!DOCTYPE html>
     <span style="display:none;" id="sbRiskOff">—</span>
   </div>
   <div class="status-actions">
+    <a class="btn btn-ghost" href="/live" style="text-decoration:none;" title="Vue orderflow epuree (chart + heatmap + tape)">🌊 LIVE</a>
     <button class="btn btn-ghost" onclick="openCmdPalette()" title="Cmd+K">⌘K</button>
     <button class="btn btn-ghost" onclick="refresh()" title="R">⟳</button>
     <button class="btn btn-ghost" onclick="openBriefModal()" title="B">📄 BRIEF</button>
@@ -731,6 +735,10 @@ const HTML = `<!DOCTYPE html>
   <div class="card col-4">
     <h2>📉 Yield Curve & Vol <span class="help">?<span class="tooltip"><strong>Yield Curve</strong><br>10Y-3M spread. INVERTED = recession signal historique. NORMAL = expansion. VIX = peur sur SPX.</span></span></h2>
     <div id="yieldCurve">Loading…</div>
+  </div>
+  <div class="card col-4">
+    <h2>🌊 Orderflow Crypto <span class="help">?<span class="tooltip"><strong>Orderflow Crypto (REAL data)</strong><br>CVD/delta from Binance 1m taker-buy volume + order-book imbalance (OBI). DIVERGENCE = price vs CVD disagree: DISTRIBUTION (price up, CVD down) = reversal-down risk; ACCUMULATION (price down, CVD up) = reversal-up potential. Confluence lens, backtest before trusting. Crypto = watch-only.</span></span></h2>
+    <div id="orderflowCrypto">Loading…</div>
   </div>
 
   <!-- ROW 4: Calendar + Key Levels + Pos Calc -->
@@ -932,6 +940,8 @@ const HTML = `<!DOCTYPE html>
 </div>
 
 <script>
+// Escape external text (news titles, alert messages) before innerHTML — RSS/API data is untrusted.
+const escT = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function switchTab(ev, name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -955,7 +965,8 @@ function openModal(id) {
 function tickClock() {
   const now = new Date();
   // Convert to UTC+7
-  const utc7 = new Date(now.getTime() + (7 * 3600 * 1000) + (now.getTimezoneOffset() * 60000));
+  // getTime() is already UTC epoch; adding getTimezoneOffset() double-corrected (+7h error on UTC+7 hosts)
+  const utc7 = new Date(now.getTime() + (7 * 3600 * 1000));
   const hh = String(utc7.getUTCHours()).padStart(2,'0');
   const mm = String(utc7.getUTCMinutes()).padStart(2,'0');
   const ss = String(utc7.getUTCSeconds()).padStart(2,'0');
@@ -1125,7 +1136,7 @@ function renderCmdResults(q) {
     const matches = LAST_NEWS.items.filter(i => (i.title||'').toLowerCase().includes(lc)).slice(0, 5);
     matches.forEach(i => {
       results.push({
-        label: '📰 ' + i.title.substring(0, 80),
+        label: '📰 ' + escT(i.title).substring(0, 80),
         sub: '['+i.category+'] ' + new Date(i.pubDate).toLocaleString(),
         action: () => { if (i.link) window.open(i.link, '_blank'); document.getElementById('cmdPalette').style.display='none'; }
       });
@@ -1261,7 +1272,7 @@ async function openSymbolModal(symbol) {
     newsHits.forEach(i => {
       const trig = i.triggers?.length ? ' 🚨' : '';
       html += '<div style="font-size:10px;border-left:2px solid var(--cyan);padding:2px 6px;margin-bottom:2px;">'
-        + '<span class="cyan" style="font-size:8px;">['+i.category+']</span>'+trig+' '+i.title.substring(0, 100)
+        + '<span class="cyan" style="font-size:8px;">['+escT(i.category)+']</span>'+trig+' '+escT(i.title.substring(0, 100))
         + '<div class="muted" style="font-size:9px;">'+new Date(i.pubDate).toLocaleString()+'</div>'
         + '</div>';
     });
@@ -1423,8 +1434,8 @@ let LAST_NEWS = null;
 async function loadGeoMonitor() {
   try {
     const news = await fetch('/api/news').then(r => r.json());
+    LAST_NEWS = news; // set BEFORE the sentiment guard so the ticker/stream/intel panels still render on sentiment-less feeds
     if (!news.sentiment) return;
-    LAST_NEWS = news;
 
     // ── SENTIMENT CARDS (Geo tab) ──
     const gold = news.sentiment.gold, oil = news.sentiment.oil;
@@ -1478,7 +1489,7 @@ async function loadGeoMonitor() {
       feedHtml += '<span class="cyan" style="font-size:9px;font-weight:bold;letter-spacing:1px;">[' + (item.category||'') + ':' + item.topic + ']</span>';
       feedHtml += '<span class="muted" style="font-size:9px;">' + new Date(item.pubDate).toLocaleString() + '</span>';
       feedHtml += '</div>';
-      feedHtml += '<div style="font-size:11px;margin:2px 0;">' + item.title + '</div>';
+      feedHtml += '<div style="font-size:11px;margin:2px 0;">' + escT(item.title) + '</div>';
       const s = item.scores || { gold: item.goldScore||0, oil: item.oilScore||0 };
       let scoreLine = '';
       Object.entries(s).forEach(([k, v]) => {
@@ -1515,7 +1526,7 @@ async function loadIntel() {
     return list.length === 0 ? '<p class="muted">No data</p>' : list.map(i => {
       const hasT = i.triggers && i.triggers.length;
       return '<div class="intel-card ' + (hasT?'crit':'') + '">'
-        + '<div><span class="cat">['+i.topic.toUpperCase()+']</span> ' + i.title.substring(0, 180) + '</div>'
+        + '<div><span class="cat">['+escT(i.topic.toUpperCase())+']</span> ' + escT(i.title.substring(0, 180)) + '</div>'
         + '<div class="meta">' + new Date(i.pubDate).toLocaleString() + (hasT ? ' · <span class="red">🚨 ' + i.triggers.join(', ') + '</span>' : '') + '</div>'
         + '</div>';
     }).join('');
@@ -1674,7 +1685,7 @@ function renderKillzones() {
   const el = document.getElementById('killzones');
   if (!el) return;
   const now = new Date();
-  const utc7 = new Date(now.getTime() + 7 * 3600 * 1000 + now.getTimezoneOffset() * 60000);
+  const utc7 = new Date(now.getTime() + 7 * 3600 * 1000);
   const hour = utc7.getUTCHours() + utc7.getUTCMinutes() / 60;
 
   let html = '';
@@ -1806,12 +1817,7 @@ async function renderBrokerLive(scan) {
 function renderTopMovers(scan) {
   const el = document.getElementById('topMovers');
   if (!el) return;
-  fetch('/api/scan').then(r=>r.json()).catch(()=>null);
-  fetch('/api/correlations').then(r=>r.json()).then(data => {
-    // /api/correlations gives history; we need raw scan history to compute % change
-    fetch('/api/scan').then(r => r.json());
-  }).catch(()=>{});
-  // Use scan_history.json snapshot via embedded prices: we re-fetch via /api/correlations? Not directly available.
+  // (dead triple-fetch of /api/scan + /api/correlations removed — the function works from the scan argument)
   // Simpler path: compute change from scan.symbols where each has .change set by news-scanner or scan.
   const syms = (scan.symbols || []).slice();
   // If scan symbols don't carry change data, derive from squeeze/range/HTF as fallback ranking
@@ -2027,6 +2033,41 @@ async function renderCryptoPulse() {
   } catch(e) { el.innerHTML = '<p class="muted">Crypto pulse error</p>'; }
 }
 
+// ── ORDERFLOW CRYPTO (real CVD + order-book imbalance from Binance) ──
+async function renderOrderflow() {
+  const el = document.getElementById('orderflowCrypto');
+  if (!el) return;
+  try {
+    const o = await fetch('/api/orderflow').then(r => r.json());
+    if (!o.symbols || !o.symbols.length) {
+      el.innerHTML = '<p class="muted">Pas de data. Lance: <code style="background:#222;padding:1px 3px;font-size:9px;">node orderflow-crypto.js</code></p>';
+      return;
+    }
+    const s = o.summary || {};
+    const biasCol = s.net_bias === 'NET_BULLISH' ? 'green' : s.net_bias === 'NET_BEARISH' ? 'red' : 'yellow';
+    let html = '<div class="stat"><span class="label">Net Bias</span><span class="value '+biasCol+'">'+(s.net_bias||'--')+'</span> <span class="muted" style="font-size:9px;">bull '+(s.bullish||0)+' / bear '+(s.bearish||0)+'</span></div>';
+    html += '<table style="width:100%;font-size:9px;border-collapse:collapse;margin-top:3px;">';
+    html += '<tr style="color:#888;"><td>SYM</td><td>CVD</td><td>BUY%</td><td>OBI</td><td>FLOW</td></tr>';
+    const regCol = r => (r==='BULLISH_FLOW'||r==='ACCUMULATION') ? 'green' : (r==='BEARISH_FLOW'||r==='DISTRIBUTION') ? 'red' : 'muted';
+    o.symbols.forEach(x => {
+      const cvdCol = x.cvd > 0 ? 'green' : x.cvd < 0 ? 'red' : 'muted';
+      const obiCol = x.obi > 0.1 ? 'green' : x.obi < -0.1 ? 'red' : 'muted';
+      const div = x.divergence ? ' <span class="amber" style="font-size:8px;">['+x.divergence+']</span>' : '';
+      html += '<tr><td><strong>'+x.symbol.replace('USDT','')+'</strong></td>'
+        + '<td class="'+cvdCol+'">'+(x.cvd>=0?'+':'')+Math.round(x.cvd)+'</td>'
+        + '<td>'+(x.buy_ratio*100).toFixed(0)+'%</td>'
+        + '<td class="'+obiCol+'">'+(x.obi==null?'--':x.obi.toFixed(2))+'</td>'
+        + '<td class="'+regCol(x.regime)+'">'+x.regime.replace('_',' ')+div+'</td></tr>';
+    });
+    html += '</table>';
+    if (s.divergences && s.divergences.length) {
+      html += '<div class="amber" style="font-size:9px;font-style:italic;border-left:2px solid var(--amber);padding:2px 6px;margin-top:3px;">DIVERGENCE: '+s.divergences.join(', ')+'</div>';
+    }
+    html += '<div class="muted" style="font-size:8px;margin-top:3px;">Binance taker CVD + OBI · confluence lens, backtest avant de trader</div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<p class="muted">Orderflow error</p>'; }
+}
+
 // ── YIELD CURVE & VOL panel ──
 async function renderYieldCurve() {
   const el = document.getElementById('yieldCurve');
@@ -2219,7 +2260,7 @@ async function renderSetupTracker() {
   if (!el) return;
   try {
     const stats = await fetch('/api/setup-stats').then(r => r.json());
-    if (stats.total_closed === undefined && stats.note) {
+    if (stats.total_closed === undefined || stats.total_open === undefined) {
       el.innerHTML = '<p class="muted">Pas de data. Lance: <code style="background:#222;padding:1px 3px;font-size:9px;">node setup-tracker.js --daemon</code></p>';
       return;
     }
@@ -2536,7 +2577,7 @@ async function renderNewsTickerBottom() {
     const isTrig = i.triggers?.length > 0;
     const cls = isTrig ? 'crit' : '';
     const cat = '<span class="cat">[' + i.category + ']</span>';
-    return '<span class="news-ticker-item ' + cls + '">' + cat + ' ' + i.title.substring(0, 130) + '</span>';
+    return '<span class="news-ticker-item ' + cls + '">' + cat + ' ' + escT(i.title.substring(0, 130)) + '</span>';
   };
   // Duplicate for seamless loop
   el.innerHTML = top.map(buildItem).join('') + top.map(buildItem).join('');
@@ -2846,7 +2887,7 @@ async function renderSetupAlertBanner() {
     bar.style.display = 'flex';
     const a = alerts[0];
     const rest = alerts.length > 1 ? ' · +' + (alerts.length - 1) + ' autres' : '';
-    bar.innerHTML = '🚨 <span style="font-weight:900;">' + a.message + '</span>'
+    bar.innerHTML = '🚨 <span style="font-weight:900;">' + escT(a.message) + '</span>'
       + rest
       + ' <button onclick="dismissAlerts()" style="background:#000;color:#fff;border:1px solid #333;padding:2px 8px;font-size:10px;border-radius:2px;cursor:pointer;font-family:inherit;margin-left:8px;">DISMISS</button>';
   } catch(e) {}
@@ -2860,6 +2901,8 @@ async function dismissAlerts() {
 let CATALYST_TIMER = null;
 async function renderCatalyst() {
   try {
+    // Kill any prior countdown first: its closure re-shows the bar every second, fighting the early-return hides below.
+    if (CATALYST_TIMER) { clearInterval(CATALYST_TIMER); CATALYST_TIMER = null; }
     const cal = await fetch('/api/calendar').then(r => r.json());
     const now = new Date();
     const upcoming = (cal.events || [])
@@ -2914,7 +2957,7 @@ function renderNewsStream(news) {
     html += '<div style="border-left:2px solid ' + cc + ';padding:3px 6px;font-size:10px;background:'+bg+';">'
       + '<div style="display:flex;justify-content:space-between;gap:4px;align-items:flex-start;">'
       + '<span style="line-height:1.3;"><span style="color:'+cc+';font-size:8px;font-weight:bold;letter-spacing:1px;">['+i.category+']</span> '
-      + i.title.substring(0, 130) + (i.title.length>130?'…':'') + '</span>'
+      + escT((i.title||'').substring(0, 130)) + ((i.title||'').length>130?'…':'') + '</span>'
       + '<span class="muted" style="font-size:8px;white-space:nowrap;">'+timeStr+'</span>'
       + '</div>'
       + (hasT ? '<div class="red" style="font-size:8px;margin-top:1px;">🚨 '+i.triggers.join(' · ')+'</div>' : '')
@@ -2985,7 +3028,7 @@ async function loadAlertsCenter() {
       html += '<div style="border-left:2px solid '+col+';padding:3px 8px;margin-bottom:2px;font-size:10px;background:'+bg+';">'
         + '<span class="' + srcCol + '" style="font-size:8px;font-weight:bold;letter-spacing:1px;">['+a.source+']</span> '
         + '<span style="color:'+col+';">[' + a.level + ']</span> '
-        + a.text
+        + escT(a.text)
         + '</div>';
     });
     el.innerHTML = html;
@@ -3182,13 +3225,14 @@ function renderTicker(scan) {
 }
 
 async function refresh() {
+  // Per-fetch catch: one transient failure (server restart, torn JSON) must not kill the whole 30s cycle.
   const [scan, fb, setups] = await Promise.all([
-    fetch('/api/scan').then(r=>r.json()),
-    fetch('/api/feedback').then(r=>r.json()),
+    fetch('/api/scan').then(r=>r.json()).catch(()=>({})),
+    fetch('/api/feedback').then(r=>r.json()).catch(()=>({})),
     fetch('/api/setups').then(r=>r.json()).catch(()=>({}))
   ]);
-  await loadGeoMonitor();
-  await loadScanHistory();
+  await loadGeoMonitor().catch(()=>{});
+  await loadScanHistory().catch(()=>{});
 
   // Market State (was regimeBox)
   const rb = document.getElementById('regimeBox');
@@ -3225,6 +3269,7 @@ async function refresh() {
   renderNewsStream(LAST_NEWS);
   renderMacroPulse();
   renderCryptoPulse();
+  renderOrderflow();
   renderYieldCurve();
   renderSectorRotation();
   renderCOT();
@@ -3241,7 +3286,7 @@ async function refresh() {
   renderMag7();
   renderSentimentTrend();
   renderCatalyst();
-  renderFreshness();
+  // renderFreshness runs on its own 60s interval; calling it here too made its 11 fetches fire 3x/min
   renderWatchlist();
   renderWEI();
   renderNewsTickerBottom();
@@ -3366,7 +3411,8 @@ async function refresh() {
     const ratio = withFull / scan.symbols.length;
     mcpStatus = ratio > 0.5 ? 'OK' : ratio > 0.1 ? 'DEGRADED' : 'OFFLINE';
   }
-  mcpEl.textContent = mcpStatus || 'OFFLINE';
+  mcpStatus = mcpStatus || 'OFFLINE'; // empty scan.json used to leave this undefined -> banner said "MCP undefined"
+  mcpEl.textContent = mcpStatus;
   mcpEl.className = 'v ' + (mcpStatus === 'OK' ? 'green' : mcpStatus === 'DEGRADED' ? 'yellow' : 'red');
 
   // Banner: degraded MCP OR stale data (>4h)
@@ -3412,8 +3458,9 @@ async function refresh() {
   const notes = fb.notes || [];
   const flEl = document.getElementById('feedbackList');
   if (flEl) {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     if (!notes.length) flEl.innerHTML = '<p style="color:#616161;">Aucune note. Ajoute des bugs, idees ou feedback sur les trades.</p>';
-    else flEl.innerHTML = notes.slice().reverse().map(n => { const t=(n.type||'idea'); return '<div class="feedback-item '+t+'"><strong>['+t.toUpperCase()+']</strong> '+(n.symbol?'<span class="cyan">'+n.symbol+'</span> ':'')+(n.text||'')+'<div class="meta">'+new Date(n.timestamp).toLocaleString()+(n.source?' · '+n.source:'')+'</div></div>'; }).join('');
+    else flEl.innerHTML = notes.slice().reverse().map(n => { const t=esc(n.type||'idea'); return '<div class="feedback-item '+t+'"><strong>['+t.toUpperCase()+']</strong> '+(n.symbol?'<span class="cyan">'+esc(n.symbol)+'</span> ':'')+esc(n.text||'')+'<div class="meta">'+esc(new Date(n.timestamp).toLocaleString())+(n.source?' · '+esc(n.source):'')+'</div></div>'; }).join('');
   }
 
 }
@@ -3424,4 +3471,409 @@ setInterval(refresh, 30000);
 </body>
 </html>`;
 
-app.listen(PORT, () => console.log('\\x1b[32m%s\\x1b[0m', '  TradeBobby Dashboard v2 running at http://localhost:' + PORT));
+// ── Focused ORDERFLOW LIVE page (static; data via /api/orderflow + /api/orderflow-depth) ──
+const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orderflow Live</title>
+<style>
+  :root{--bg:#0a0c0f;--panel:#10141a;--border:#1e2630;--muted:#6b7785;--g:#28dc78;--r:#ff4646;--y:#ffc14d;--cy:#3fd0ff;--tx:#cfd8e3}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  .alertstrip{flex:0 0 auto;display:none;padding:5px 14px;background:#1c1206;border-bottom:1px solid var(--y);font-size:11px}
+  .alertstrip b{margin:0 3px}
+  header{display:flex;align-items:center;gap:14px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap}
+  header .brand{font-weight:700;letter-spacing:1px;color:var(--cy)}
+  .symbtn{background:#161c24;border:1px solid var(--border);color:var(--muted);padding:4px 9px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px}
+  .symbtn.on{background:var(--cy);color:#000;border-color:var(--cy);font-weight:700}
+  .kv{color:var(--muted)} .kv b{color:var(--tx);font-weight:600}
+  .val{font-weight:700}.g{color:var(--g)}.r{color:var(--r)}.y{color:var(--y)}.muted{color:var(--muted)}
+  a.link{margin-left:auto;color:var(--muted);text-decoration:none;font-size:11px;border:1px solid var(--border);padding:4px 9px;border-radius:4px}
+  main{display:flex;gap:10px;padding:10px;flex:1 1 auto;min-height:0}
+  @media(max-width:900px){main{flex-direction:column;flex:none;height:auto;overflow:auto}}
+  .chartwrap{flex:1.7 1 0;min-width:0;background:#0a0c0f;border:1px solid var(--border);border-radius:6px;overflow:hidden;height:100%;min-height:520px;display:flex;flex-direction:column}
+  .chead{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;flex:0 0 auto}
+  .chead .price{font-weight:700;font-size:15px}
+  #ivbtns{margin-left:auto}
+  .ivbtn{background:#161c24;border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;margin-left:4px}
+  .ivbtn.on{background:var(--cy);color:#000;font-weight:700}
+  .canvasbox{flex:1 1 auto;position:relative;min-height:0}
+  #chart{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .chartwrap iframe{width:100%;height:100%;border:0;display:block}
+  aside{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:10px;min-height:0;height:100%;overflow:auto}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .s{display:flex;justify-content:space-between;background:#0d1219;border:1px solid var(--border);border-radius:4px;padding:5px 8px}
+  .sl{color:var(--muted);font-size:10px}.sv{font-weight:700}
+  .notes{color:var(--y);font-size:11px;font-style:italic;min-height:14px}
+  .tag{background:var(--y);color:#000;font-weight:700;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:5px}
+  .hmhead{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;letter-spacing:.5px;margin-bottom:4px;text-transform:uppercase}
+  .heatmap{flex:1;overflow:auto;display:flex;flex-direction:column;gap:1px}
+  .lvl{position:relative;display:flex;align-items:center;justify-content:space-between;height:15px;padding:0 6px;font-size:10px;border-radius:2px;overflow:hidden}
+  .lvl .bar{position:absolute;left:0;top:0;bottom:0;z-index:0}
+  .lvl .px,.lvl .vol{position:relative;z-index:1}
+  .lvl .px{color:#cfd8e3}.lvl .vol{color:#9aa7b4}
+  .lvl.ask .px{color:#ffb3b3}.lvl.bid .px{color:#b3ffd1}
+  .middiv{display:flex;justify-content:space-between;align-items:center;height:20px;padding:0 6px;margin:2px 0;background:#161c24;border:1px solid var(--border);border-radius:3px;font-size:10px;font-weight:700;color:var(--cy)}
+  .tape{overflow:auto;display:flex;flex-direction:column;gap:1px;max-height:150px}
+  .trow{display:flex;justify-content:space-between;font-size:10px;padding:1px 6px;border-radius:2px}
+  .trow.buy{background:rgba(40,220,120,.10)}.trow.sell{background:rgba(255,70,70,.10)}
+  .trow.buy .tp{color:var(--g)}.trow.sell .tp{color:var(--r)}
+  .trow.big{font-weight:700}.trow.big .tq{color:#fff}.trow .tq{color:#9aa7b4}.trow .tt{color:var(--muted);font-size:9px}
+  .disc{color:var(--muted);font-size:9px;padding:0 14px 8px}
+</style></head><body>
+<header>
+  <span class="brand">🌊 ORDERFLOW LIVE</span>
+  <span id="syms"></span>
+  <span class="kv">bias <span id="bias" class="val">--</span></span>
+  <span class="kv" title="Delta cumule (taker buy - sell) depuis l'ouverture de la page, temps reel">session Δ <b id="sessd">--</b></span>
+  <span class="kv" title="Trades >= $25k depuis l'ouverture (achats/ventes agressifs)">whales <b id="whales">0/0</b></span>
+  <span class="kv"><b id="livedot" style="color:#6b7785" title="WebSocket temps reel: vert = stream actif, gris = fallback polling">●</b></span>
+  <span class="kv">updated <b id="ts">--</b></span>
+  <a class="link" href="/">full terminal →</a>
+</header>
+<div class="alertstrip" id="alertstrip"></div>
+<main>
+  <section class="chartwrap"><div class="chead"><b id="csym">BTC</b><span class="muted">·</span><span id="cprice" class="price">--</span><span id="ivbtns"></span></div><div class="canvasbox"><canvas id="chart"></canvas></div></section>
+  <aside>
+    <div class="card">
+      <div class="stats" id="flow"></div>
+      <div class="notes" id="notes" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <div class="hmhead"><span>Trades tape &middot; time &amp; sales</span><span class="muted">buy / sell aggressor</span></div>
+      <div class="tape" id="tape"></div>
+    </div>
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <div class="hmhead"><span>Liquidity heatmap · order book</span><span>mid <b id="mid" style="color:#cfd8e3">--</b> · spread <b id="spread" style="color:#cfd8e3">--</b></span></div>
+      <div class="heatmap" id="heatmap"></div>
+    </div>
+  </aside>
+</main>
+<div class="disc">Real Binance data · CVD = true taker buy/sell (1m klines) · heatmap = live order-book resting liquidity · confluence lens, backtest before trading · crypto = watch-only</div>
+<script>
+  var SYMS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT'];
+  var cur='BTCUSDT';
+  var IV='5m';
+  try{var ss=localStorage.getItem('ofSym');if(ss&&SYMS.indexOf(ss)>=0)cur=ss;
+      var si=localStorage.getItem('ofIv');if(si&&['1m','5m','15m','1h'].indexOf(si)>=0)IV=si;}catch(e){}
+  function pp(p){return p>=1000?1:p>=1?2:p>=0.01?5:7;}
+  var _audio=null;
+  function beep(freq){try{_audio=_audio||new (window.AudioContext||window.webkitAudioContext)();var o=_audio.createOscillator(),g=_audio.createGain();o.type='sine';o.frequency.value=freq||640;g.gain.value=0.05;o.connect(g);g.connect(_audio.destination);o.start();o.stop(_audio.currentTime+0.13);}catch(e){}}
+  var _lastDiv;
+  function updateAlerts(divs){
+    divs=divs||[];var as=document.getElementById('alertstrip');if(!as)return;
+    if(!divs.length){as.style.display='none';as.innerHTML='';}
+    else{as.style.display='block';as.innerHTML='⚠ DIVERGENCES &nbsp; '+divs.map(function(x){var p=x.split(':');return '<b class="'+(p[1]==='BULL_DIV'?'g':'r')+'">'+p[0].replace('USDT','')+' '+p[1]+'</b>';}).join(' &middot; ');}
+    var key=divs.slice().sort().join(',');
+    if(_lastDiv!==undefined&&key&&key!==_lastDiv){beep(divs.join().indexOf('BULL')>=0?780:520);}
+    _lastDiv=key;
+  }
+  async function drawChart(){
+    var cv=document.getElementById('chart');if(!cv)return;
+    var ce=document.getElementById('csym');if(ce)ce.textContent=cur.replace('USDT','');
+    var dpr=window.devicePixelRatio||1;
+    var W=cv.clientWidth||(cv.parentElement&&cv.parentElement.clientWidth)||600;
+    var H=cv.clientHeight||(cv.parentElement&&cv.parentElement.clientHeight)||440;
+    cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
+    var ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,W,H);ctx.fillStyle='#0a0c0f';ctx.fillRect(0,0,W,H);
+    function msg(t,c){ctx.fillStyle=c||'#6b7785';ctx.font='12px ui-monospace,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,W/2,H/2);}
+    try{
+      var d=await fetch('/api/orderflow-klines?symbol='+cur+'&interval='+IV+'&limit=120').then(function(r){return r.json();});
+      var cs=d.candles||[];
+      if(!cs.length){msg('no candle data'+(d.error?' ('+d.error+')':''));return;}
+      var padR=62,padT=10,padB=10,plotW=W-padR,cvdH=Math.max(38,Math.round((H-padT-padB)*0.26)),cgap=8,plotH=(H-padT-padB)-cvdH-cgap;
+      var lo=cs[0].l,hi=cs[0].h;for(var i=0;i<cs.length;i++){if(cs[i].l<lo)lo=cs[i].l;if(cs[i].h>hi)hi=cs[i].h;}
+      var range=(hi-lo)||1;lo-=range*0.05;hi+=range*0.05;range=hi-lo;
+      function yOf(p){return padT+(hi-p)/range*plotH;}
+      ctx.font='10px ui-monospace,monospace';ctx.textBaseline='middle';ctx.textAlign='left';
+      for(var g=0;g<=4;g++){var pr=hi-range*g/4;var yy=yOf(pr);ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(plotW,yy);ctx.stroke();ctx.fillStyle='#6b7785';ctx.fillText(pr.toFixed(pp(pr)),plotW+6,yy);}
+      var n=cs.length,cw=plotW/n,bw=Math.max(1,cw*0.6);
+      // Volume bars: bottom 14% of the price pane, drawn first so candles overlay them
+      var vmax=0;for(var i=0;i<n;i++){if(cs[i].v>vmax)vmax=cs[i].v;}
+      if(vmax>0){for(var i=0;i<n;i++){var vc=cs[i];var vh=(vc.v/vmax)*plotH*0.14;
+        ctx.fillStyle=vc.c>=vc.o?'rgba(40,220,120,0.22)':'rgba(255,70,70,0.22)';
+        ctx.fillRect(i*cw+cw/2-bw/2,padT+plotH-vh,bw,vh);}}
+      for(var i=0;i<n;i++){var c=cs[i];var x=i*cw+cw/2;var up=c.c>=c.o;var col=up?'#28dc78':'#ff4646';ctx.strokeStyle=col;ctx.fillStyle=col;
+        ctx.beginPath();ctx.moveTo(x,yOf(c.h));ctx.lineTo(x,yOf(c.l));ctx.stroke();
+        var yo=yOf(c.o),yc=yOf(c.c);var top=Math.min(yo,yc);var bh=Math.max(1,Math.abs(yc-yo));ctx.fillRect(x-bw/2,top,bw,bh);}
+      // Time axis: 4 HH:MM labels along the bottom of the price pane
+      ctx.fillStyle='#4a5561';ctx.font='9px ui-monospace,monospace';ctx.textAlign='center';
+      for(var g2=0;g2<4;g2++){var ti=Math.min(n-1,Math.round(g2*(n-1)/3));var td=new Date(cs[ti].t);
+        var tl=('0'+td.getHours()).slice(-2)+':'+('0'+td.getMinutes()).slice(-2);
+        ctx.fillText(tl,Math.max(16,Math.min(plotW-16,ti*cw+cw/2)),padT+plotH-4);}
+      ctx.textAlign='left';
+      var last=cs[n-1].c;var ly=yOf(last);ctx.strokeStyle='rgba(63,208,255,0.5)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(0,ly);ctx.lineTo(plotW,ly);ctx.stroke();ctx.setLineDash([]);
+      ctx.fillStyle='#3fd0ff';ctx.fillRect(plotW,ly-8,padR,16);ctx.fillStyle='#000';ctx.font='bold 10px ui-monospace,monospace';ctx.fillText(last.toFixed(pp(last)),plotW+5,ly);
+      // Whale prints: live $25k+ trades from the stream, plotted on the price pane (size ~ notional)
+      if(WMARKS.length&&n>1){
+        var t0=cs[0].t,ivMs=cs[1].t-cs[0].t,tSpan=(cs[n-1].t-t0)+ivMs;
+        for(var wi=0;wi<WMARKS.length;wi++){var w=WMARKS[wi];
+          if(w.t<t0||w.p>hi||w.p<lo)continue;
+          var wx=((w.t-t0)/tSpan)*plotW,wy=yOf(w.p);
+          var wr=2.5+Math.min(4,Math.log10(w.n/25000+1)*3);
+          ctx.beginPath();ctx.arc(Math.min(wx,plotW-3),wy,wr,0,6.2832);
+          ctx.fillStyle=w.side==='buy'?'rgba(40,220,120,0.85)':'rgba(255,70,70,0.85)';ctx.fill();
+          ctx.strokeStyle='rgba(255,255,255,0.55)';ctx.lineWidth=0.8;ctx.stroke();ctx.lineWidth=1;}
+      }
+      var cvdTop=padT+plotH+cgap,cvd=0,series=[];
+      for(var i=0;i<n;i++){series.push(cvd+=(2*(cs[i].tb||0)-(cs[i].v||0)));}
+      var cmin=series[0],cmax=series[0];for(var i=0;i<n;i++){if(series[i]<cmin)cmin=series[i];if(series[i]>cmax)cmax=series[i];}
+      var crange=(cmax-cmin)||1;function cy(val){return cvdTop+(cmax-val)/crange*cvdH;}
+      ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.beginPath();ctx.moveTo(0,cvdTop);ctx.lineTo(plotW,cvdTop);ctx.stroke();
+      if(cmin<0&&cmax>0){var zy=cy(0);ctx.strokeStyle='rgba(255,255,255,0.13)';ctx.beginPath();ctx.moveTo(0,zy);ctx.lineTo(plotW,zy);ctx.stroke();}
+      ctx.strokeStyle=series[n-1]>=0?'#28dc78':'#ff4646';ctx.lineWidth=1.3;ctx.beginPath();
+      for(var i=0;i<n;i++){var ccx=i*cw+cw/2,ccy=cy(series[i]);if(i===0)ctx.moveTo(ccx,ccy);else ctx.lineTo(ccx,ccy);}
+      ctx.stroke();ctx.lineWidth=1;
+      ctx.fillStyle='#9aa7b4';ctx.font='9px ui-monospace,monospace';ctx.textAlign='left';ctx.fillText('CVD '+(series[n-1]>=0?'+':'')+Math.round(series[n-1]),3,cvdTop+8);
+      var pe=document.getElementById('cprice');if(pe){pe.textContent=last.toFixed(pp(last));pe.className='price '+(cs[n-1].c>=cs[n-1].o?'g':'r');}
+    }catch(e){msg('chart error: '+((e&&e.message)||e),'#ff4646');}
+  }
+  function setSym(s){cur=s;try{localStorage.setItem('ofSym',s);}catch(e){}var b=document.querySelectorAll('.symbtn');for(var i=0;i<b.length;i++){b[i].classList.toggle('on',b[i].getAttribute('data-s')===s);}
+    TAPE=[];sessDelta=0;whaleB=0;whaleS=0;WMARKS=[];tapeDirty=true;renderSess();startStream();drawChart();refresh();}
+  function stat(l,v,c){return '<div class="s"><span class="sl">'+l+'</span><span class="sv '+(c||'')+'">'+v+'</span></div>';}
+  function regCol(r){r=r||'';return (r.indexOf('BULL')>=0||r==='ACCUMULATION')?'g':(r.indexOf('BEAR')>=0||r==='DISTRIBUTION')?'r':'y';}
+  async function loadFlow(){
+    try{
+      var o=await fetch('/api/orderflow').then(function(r){return r.json();});
+      var bias=(o.summary&&o.summary.net_bias)||'--';
+      var be=document.getElementById('bias');be.textContent=bias;be.className='val '+(bias==='NET_BULLISH'?'g':bias==='NET_BEARISH'?'r':'y');
+      var te=document.getElementById('ts');
+      if(te&&o.timestamp){var ageS=(Date.now()-new Date(o.timestamp).getTime())/1000;te.textContent=new Date(o.timestamp).toLocaleTimeString()+(ageS>120?' (STALE)':'');te.style.color=ageS>120?'#ff4646':'';}
+      updateAlerts((o.summary&&o.summary.divergences)||[]);
+      var s=(o.symbols||[]).filter(function(x){return x.symbol===cur;})[0];
+      if(!s){document.getElementById('flow').innerHTML='<div class="muted">no flow data</div>';document.getElementById('notes').textContent='';return;}
+      var dv=s.divergence?'<span class="tag">'+s.divergence+'</span>':'';
+      var rg=s.regime||'NEUTRAL';var wm=s.window_min||30;
+      document.getElementById('flow').innerHTML=
+        stat('CVD ('+wm+'m)',(s.cvd>=0?'+':'')+Math.round(s.cvd||0),s.cvd>0?'g':'r')+
+        stat('Last delta',(s.last_delta>=0?'+':'')+Math.round(s.last_delta||0),s.last_delta>0?'g':'r')+
+        stat('Taker buy %',s.buy_ratio==null?'--':(s.buy_ratio*100).toFixed(0)+'%',s.buy_ratio>0.5?'g':'r')+
+        stat('Book OBI',s.obi==null?'--':s.obi.toFixed(2),s.obi>0.1?'g':(s.obi<-0.1?'r':'y'))+
+        stat('Price '+wm+'m',(s.price_change_pct>=0?'+':'')+(s.price_change_pct||0)+'%',s.price_change_pct>0?'g':'r')+
+        stat('Regime',rg.replace('_',' ')+dv,regCol(rg));
+      document.getElementById('notes').textContent=s.notes&&s.notes!=='--'?s.notes:'';
+    }catch(e){}
+  }
+  async function loadDepth(){
+    try{
+      var d=await fetch('/api/orderflow-depth?symbol='+cur).then(function(r){return r.json();});
+      var el=document.getElementById('heatmap');
+      if(!d.levels||!d.levels.length){el.innerHTML='<div class="muted">no depth ('+(d.error||'')+')</div>';return;}
+      var h='',prev=null;
+      for(var i=0;i<d.levels.length;i++){
+        var l=d.levels[i];
+        if(prev==='ask'&&l.side==='bid'){h+='<div class="middiv"><span>MID '+d.mid+'</span><span>'+d.spread_bps+' bps</span></div>';}
+        var frac=l.vol/(d.maxVol>0?d.maxVol:1);var pct=Math.min(100,Math.round(frac*100));
+        var col=(l.side==='ask'?'rgba(255,70,70,':'rgba(40,220,120,')+(0.12+0.55*frac)+')';
+        h+='<div class="lvl '+l.side+'"><span class="bar" style="width:'+pct+'%;background:'+col+'"></span><span class="px">'+l.price+'</span><span class="vol">'+l.vol.toFixed(2)+'</span></div>';
+        prev=l.side;
+      }
+      // Anti-flicker: skip the repaint when the depth snapshot is identical to the last one
+      if(el.__last!==h){el.__last=h;el.innerHTML=h;}
+      document.getElementById('mid').textContent=d.mid;
+      document.getElementById('spread').textContent=(d.spread_bps<0.01?'<0.01':d.spread_bps)+' bps';
+    }catch(e){var eh=document.getElementById('heatmap');if(eh&&!eh.children.length)eh.innerHTML='<div class="muted">depth: reconnexion…</div>';}
+  }
+  // ── Real-time stream (SSE relay of Binance aggTrade). Polling below stays as automatic fallback. ──
+  var es=null,streamOk=false,TAPE=[],tapeDirty=false,sessDelta=0,whaleB=0,whaleS=0,WHALE_USD=25000,WMARKS=[];
+  function fmtTime(t){var d=new Date(t);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);}
+  function renderTape(){
+    if(!tapeDirty)return;tapeDirty=false;
+    var el=document.getElementById('tape');if(!el||!TAPE.length)return;
+    var h='';
+    for(var i=0;i<TAPE.length;i++){
+      var x=TAPE[i];var big=(x.p*x.q)>=WHALE_USD?' big':'';
+      h+='<div class="trow '+x.side+big+'"><span class="tp">'+x.p+'</span><span class="tq">'+x.q.toFixed(4)+'</span><span class="tt">'+fmtTime(x.t)+'</span></div>';
+    }
+    // Anti-flicker: polling fallback resends identical trades — only repaint on change
+    if(el.__last!==h){el.__last=h;el.innerHTML=h;}
+  }
+  function renderSess(){
+    var sd=document.getElementById('sessd');
+    if(sd){sd.textContent=(sessDelta>=0?'+':'')+sessDelta.toFixed(3);sd.style.color=sessDelta>=0?'#28dc78':'#ff4646';}
+    var w=document.getElementById('whales');
+    if(w){w.innerHTML='<span style="color:#28dc78">'+whaleB+'</span>/<span style="color:#ff4646">'+whaleS+'</span>';}
+  }
+  function setLive(on){streamOk=on;var d=document.getElementById('livedot');if(d){d.style.color=on?'#28dc78':'#6b7785';d.title=on?'Stream temps reel ACTIF (WebSocket Binance)':'Stream coupe -- fallback polling 2s';}}
+  function startStream(){
+    if(es){try{es.close();}catch(e){}es=null;}
+    setLive(false);
+    if(typeof EventSource==='undefined')return;
+    try{
+      es=new EventSource('/api/orderflow-stream?symbol='+cur);
+      es.addEventListener('trade',function(ev){
+        var x;try{x=JSON.parse(ev.data);}catch(e){return;}
+        setLive(true);
+        TAPE.unshift(x);if(TAPE.length>60)TAPE.length=60;tapeDirty=true;
+        sessDelta+=(x.side==='buy'?x.q:-x.q);
+        if(x.p*x.q>=WHALE_USD){if(x.side==='buy')whaleB++;else whaleS++;
+          WMARKS.push({t:x.t,p:x.p,side:x.side,n:x.p*x.q});if(WMARKS.length>200)WMARKS.shift();}
+        var pe=document.getElementById('cprice');if(pe){pe.textContent=x.p;pe.className='price '+(x.side==='buy'?'g':'r');}
+      });
+      es.onerror=function(){setLive(false);};
+    }catch(e){setLive(false);}
+  }
+  setInterval(renderTape,400);   // throttled paint: busy markets stream many trades/sec
+  setInterval(renderSess,800);
+  async function loadTape(){
+    if(streamOk)return; // stream is painting the tape; polling is fallback only
+    try{
+      var t=await fetch('/api/orderflow-trades?symbol='+cur).then(function(r){return r.json();});
+      var el=document.getElementById('tape');
+      if(!t.trades||!t.trades.length){el.innerHTML='<div class="muted">no trades</div>';return;}
+      TAPE=t.trades.slice(0,60);tapeDirty=true;
+    }catch(e){var et=document.getElementById('tape');if(et&&!TAPE.length)et.innerHTML='<div class="muted">tape: reconnexion…</div>';}
+  }
+  function refresh(){loadFlow();loadDepth();loadTape();}
+  (function init(){
+    var html='';for(var i=0;i<SYMS.length;i++){var s=SYMS[i];html+='<button class="symbtn'+(s===cur?' on':'')+'" data-s="'+s+'">'+s.replace('USDT','')+'</button> ';}
+    var sc=document.getElementById('syms');sc.innerHTML=html;
+    sc.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.symbtn'):null;if(b)setSym(b.getAttribute('data-s'));});
+    var IVS=['1m','5m','15m','1h'];var ie='';for(var j=0;j<IVS.length;j++){ie+='<button class="ivbtn'+(IVS[j]===IV?' on':'')+'" data-iv="'+IVS[j]+'">'+IVS[j]+'</button>';}
+    var ib=document.getElementById('ivbtns');if(ib){ib.innerHTML=ie;ib.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.ivbtn'):null;if(!b)return;IV=b.getAttribute('data-iv');try{localStorage.setItem('ofIv',IV);}catch(e){}var bs=ib.querySelectorAll('.ivbtn');for(var k=0;k<bs.length;k++)bs[k].classList.toggle('on',bs[k].getAttribute('data-iv')===IV);drawChart();});}
+    startStream();drawChart();refresh();
+    var rt;window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(drawChart,150);});
+    // Pause all polling when the tab is hidden (no wasted Binance calls), resume + refresh on return.
+    var timers=[];
+    function startTimers(){if(timers.length)return;timers=[setInterval(drawChart,5000),setInterval(loadDepth,4000),setInterval(loadTape,2000),setInterval(loadFlow,15000)];}
+    function stopTimers(){for(var i=0;i<timers.length;i++)clearInterval(timers[i]);timers=[];}
+    startTimers();
+    document.addEventListener('visibilitychange',function(){if(document.hidden){stopTimers();}else{refresh();drawChart();startTimers();}});
+  })();
+</script></body></html>`;
+
+// ── Live order-book liquidity heatmap (REAL Binance depth, fetched on-demand) ──
+// Shared helpers for the live Binance-proxy endpoints: strict symbol shape + fetch timeout
+// (no hung sockets piling up under the /live page's 2-4s polling).
+const OF_SYM = s => /^[A-Z0-9]{5,12}$/.test(s);
+const ofFetch = u => fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(9000) });
+app.get('/api/orderflow-depth', async (req, res) => {
+  const sym = String(req.query.symbol || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!OF_SYM(sym)) return res.json({ symbol: sym, error: 'bad symbol', levels: [] });
+  try {
+    const r = await ofFetch('https://api.binance.com/api/v3/depth?symbol=' + sym + '&limit=100');
+    if (!r.ok) return res.json({ symbol: sym, error: 'binance ' + r.status, levels: [] });
+    const d = await r.json();
+    if (!d.bids || !d.asks || !d.bids.length || !d.asks.length) return res.json({ symbol: sym, error: 'no depth', levels: [] });
+    const bestBid = parseFloat(d.bids[0][0]), bestAsk = parseFloat(d.asks[0][0]);
+    const mid = (bestBid + bestAsk) / 2;
+    if (!Number.isFinite(mid) || mid <= 0) return res.json({ symbol: sym, error: 'bad depth', levels: [] });
+    // Size the band from the book actually received (100 levels/side), capped at 0.35% of mid.
+    // A fixed band on a tight BTC book rendered dozens of empty 0.00 rows past the real depth.
+    const lastAsk = parseFloat(d.asks[d.asks.length - 1][0]);
+    const lastBid = parseFloat(d.bids[d.bids.length - 1][0]);
+    const span = Math.max(mid * 0.0002, Math.min(mid * 0.0035, Math.max(lastAsk - mid, mid - lastBid)));
+    const nSide = 18, bucket = span / nSide;
+    const asks = new Array(nSide).fill(0), bids = new Array(nSide).fill(0);
+    for (const [p, q] of d.asks) { const i = Math.floor((parseFloat(p) - mid) / bucket); if (i >= 0 && i < nSide) asks[i] += parseFloat(q); }
+    for (const [p, q] of d.bids) { const i = Math.floor((mid - parseFloat(p)) / bucket); if (i >= 0 && i < nSide) bids[i] += parseFloat(q); }
+    // Trim the empty far tail on each side (keep at least 8 rows/side) so every visible row carries information.
+    let askN = nSide, bidN = nSide;
+    while (askN > 8 && asks[askN - 1] === 0) askN--;
+    while (bidN > 8 && bids[bidN - 1] === 0) bidN--;
+    const prec = Math.min(12, Math.max(2, Math.ceil(-Math.log10(bucket)) + 1)), levels = []; // scale precision to bucket so micro-priced coins don't collapse to identical rows
+    for (let i = askN - 1; i >= 0; i--) levels.push({ price: +(mid + (i + 0.5) * bucket).toFixed(prec), vol: +asks[i].toFixed(3), side: 'ask' });
+    for (let i = 0; i < bidN; i++) levels.push({ price: +(mid - (i + 0.5) * bucket).toFixed(prec), vol: +bids[i].toFixed(3), side: 'bid' });
+    const maxVol = Math.max(1e-9, ...levels.map(l => l.vol));
+    res.json({ symbol: sym, ts: Date.now(), mid: +mid.toFixed(prec), spread_bps: +(((bestAsk - bestBid) / mid) * 10000).toFixed(3), maxVol: +Math.max(1e-6, maxVol).toFixed(6), levels });
+  } catch (e) { res.json({ symbol: sym, error: e.message, levels: [] }); }
+});
+
+// ── Live trades tape (time & sales) from Binance aggTrades, true buy/sell classification ──
+app.get('/api/orderflow-trades', async (req, res) => {
+  const sym = String(req.query.symbol || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!OF_SYM(sym)) return res.json({ symbol: sym, error: 'bad symbol', trades: [] });
+  try {
+    const r = await ofFetch('https://api.binance.com/api/v3/aggTrades?symbol=' + sym + '&limit=60');
+    if (!r.ok) return res.json({ symbol: sym, error: 'binance ' + r.status, trades: [] });
+    const a = await r.json();
+    if (!Array.isArray(a)) return res.json({ symbol: sym, error: 'no trades', trades: [] });
+    // m = isBuyerMaker: true => the aggressive side was the SELLER; false => aggressive BUYER.
+    const trades = a.map(t => ({ p: parseFloat(t.p), q: parseFloat(t.q), side: t.m ? 'sell' : 'buy', t: t.T })).reverse();
+    const maxNotional = Math.max(1e-9, ...trades.map(x => x.p * x.q));
+    res.json({ symbol: sym, ts: Date.now(), maxNotional: +maxNotional.toFixed(2), trades });
+  } catch (e) { res.json({ symbol: sym, error: e.message, trades: [] }); }
+});
+
+// ── Real-time trades stream: ONE upstream Binance WebSocket per symbol (Node>=21 native WS),
+//    fanned out to any number of browser tabs via Server-Sent Events. No new dependency.
+//    Client falls back to REST polling if this endpoint errors. ──
+const OF_STREAMS = new Map(); // sym -> { ws, clients:Set<res> }
+function ofStreamEnsure(sym) {
+  let s = OF_STREAMS.get(sym);
+  if (s && s.ws && s.ws.readyState <= 1) return s;
+  if (!s) { s = { ws: null, clients: new Set() }; OF_STREAMS.set(sym, s); }
+  const ws = new WebSocket('wss://stream.binance.com:9443/ws/' + sym.toLowerCase() + '@aggTrade');
+  s.ws = ws;
+  ws.onmessage = (ev) => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    if (d.e !== 'aggTrade') return;
+    // m = isBuyerMaker: true => aggressive SELL, false => aggressive BUY (same rule as /api/orderflow-trades)
+    const line = 'event: trade\ndata: ' + JSON.stringify({ p: +d.p, q: +d.q, side: d.m ? 'sell' : 'buy', t: d.T }) + '\n\n';
+    for (const c of s.clients) { try { c.write(line); } catch {} }
+  };
+  ws.onclose = () => { // reconnect while clients remain
+    if (OF_STREAMS.get(sym) === s && s.clients.size) setTimeout(() => { if (s.clients.size) { s.ws = null; ofStreamEnsure(sym); } }, 2000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+  return s;
+}
+app.get('/api/orderflow-stream', (req, res) => {
+  const sym = String(req.query.symbol || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!OF_SYM(sym)) return res.status(400).end();
+  if (typeof WebSocket === 'undefined') return res.status(501).json({ error: 'ws unsupported on this node' });
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.write('retry: 3000\n\n');
+  const s = ofStreamEnsure(sym);
+  s.clients.add(res);
+  const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch {} }, 15000);
+  req.on('close', () => {
+    clearInterval(hb);
+    s.clients.delete(res);
+    // linger 30s so a page refresh reuses the upstream socket instead of churning it
+    setTimeout(() => { const cur = OF_STREAMS.get(sym); if (cur && !cur.clients.size && cur.ws) { try { cur.ws.close(); } catch {} OF_STREAMS.delete(sym); } }, 30000);
+  });
+});
+
+// Ops visibility: which upstream Binance sockets are open and how many browser tabs hang off each.
+app.get('/api/orderflow-stream-status', (req, res) => {
+  const streams = {};
+  for (const [sym, s] of OF_STREAMS) {
+    streams[sym] = { clients: s.clients.size, upstream: s.ws ? ['connecting', 'open', 'closing', 'closed'][s.ws.readyState] : 'none' };
+  }
+  res.json({ count: OF_STREAMS.size, streams });
+});
+
+// ── Candles for the self-drawn canvas chart (no external embed, can't be blocked) ──
+app.get('/api/orderflow-klines', async (req, res) => {
+  const sym = String(req.query.symbol || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const interval = ['1m', '5m', '15m', '1h'].includes(req.query.interval) ? req.query.interval : '5m';
+  const limit = Math.min(300, Math.max(20, parseInt(req.query.limit, 10) || 120));
+  if (!OF_SYM(sym)) return res.json({ symbol: sym, error: 'bad symbol', candles: [] });
+  try {
+    const r = await ofFetch('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + interval + '&limit=' + limit);
+    if (!r.ok) return res.json({ symbol: sym, error: 'binance ' + r.status, candles: [] });
+    const k = await r.json();
+    if (!Array.isArray(k)) return res.json({ symbol: sym, error: 'no klines', candles: [] });
+    const candles = k.map(b => ({ t: b[0], o: +b[1], h: +b[2], l: +b[3], c: +b[4], v: +b[5], tb: +b[9] }));
+    res.json({ symbol: sym, interval, candles });
+  } catch (e) { res.json({ symbol: sym, error: e.message, candles: [] }); }
+});
+
+// ── Clean focused ORDERFLOW LIVE view: chart + live liquidity heatmap + CVD/delta/divergence ──
+app.get('/live', (req, res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate'); res.type('html').send(LIVE_HTML); });
+
+// Handle malformed JSON gracefully (error-handling middleware must come AFTER routes)
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ ok: false, error: 'invalid JSON' });
+  }
+  // Generic fallback: log server-side, never echo the stack trace / filesystem paths to the client.
+  console.error(err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ ok: false, error: 'internal error' });
+});
+
+// Bind to loopback only: this dashboard has no auth and must not be exposed to the LAN.
+app.listen(PORT, '127.0.0.1', () => console.log('\\x1b[32m%s\\x1b[0m', '  TradeBobby Dashboard v2 running at http://localhost:' + PORT));

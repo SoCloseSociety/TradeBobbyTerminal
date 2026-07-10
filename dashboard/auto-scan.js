@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { loadWatchlist, normalizeSymbol } from './load-rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Path to the TradingView MCP Jackson installation.
@@ -16,16 +17,8 @@ const PORTFOLIO_PATH = join(__dirname, '..', 'paper_portfolio.json');
 const SCAN_PATH = join(__dirname, 'last_scan.json');
 const LOG_PATH = join(__dirname, 'auto-scan.log');
 
-const WATCHLIST = [
-  // Commodities — PRIORITY (macro-driven)
-  'XAGUSD', 'XAUUSD', 'USOIL', 'UKOIL',
-  // Crypto
-  'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD',
-  // Forex
-  'EURUSD', 'GBPUSD', 'GBPJPY', 'USDJPY',
-  // Indices
-  'NAS100', 'SPX500', 'DAX', 'CAC40'
-];
+// Watchlist comes from rules.json (single source of truth); fallback if unreadable.
+const WATCHLIST = loadWatchlist(['XAUUSD','EURUSD','GBPUSD','USDJPY','NAS100','SPX500','US30','DAX','NVDA','AAPL','TSLA','QQQ']);
 
 function log(msg) {
   const ts = new Date().toISOString();
@@ -114,6 +107,12 @@ function analyzeSetup(sym, data4H, data1H, price) {
 function checkPortfolio(priceMap) {
   if (!existsSync(PORTFOLIO_PATH)) return null;
   const pf = JSON.parse(readFileSync(PORTFOLIO_PATH, 'utf8'));
+  // Default the shape so a hand-edited portfolio missing a top-level key can't crash the whole scan.
+  pf.open_positions = pf.open_positions || [];
+  pf.pending_orders = pf.pending_orders || [];
+  pf.closed_trades = pf.closed_trades || [];
+  pf.account = pf.account || { balance: 10000, initial_balance: 10000 };
+  pf.stats = pf.stats || {};
   const alerts = [];
 
   // Check open positions (skip already closed)
@@ -191,7 +190,7 @@ function checkPortfolio(priceMap) {
 
   // Check pending orders — trigger or expire
   const today = new Date().toISOString().split('T')[0];
-  for (const order of pf.pending_orders) {
+  for (const order of (pf.pending_orders || [])) {
     // Expire orders past their date
     if (order.expires && order.expires < today) {
       alerts.push(`⏰ EXPIRED ${order.symbol} ${order.direction} @ ${order.entry} — order expired ${order.expires}`);
@@ -212,7 +211,7 @@ function checkPortfolio(priceMap) {
     }
   }
   // Remove expired orders
-  pf.pending_orders = pf.pending_orders.filter(o => o.status !== 'EXPIRED');
+  pf.pending_orders = (pf.pending_orders || []).filter(o => o.status !== 'EXPIRED');
 
   // ── RECALCULATE STATS (fix bug: total_pnl, peak, win_rate were desynced) ──
   if (!pf.stats) pf.stats = {};
@@ -240,15 +239,37 @@ function checkPortfolio(priceMap) {
 async function run() {
   log('═══ AUTO-SCAN START ═══');
 
+  // Self-heal: initialize a fresh paper account if the portfolio file is missing.
+  // Without this, the unguarded reads below (and in scan.js) throw ENOENT and the
+  // scan never gets written. Default = $10k paper account, no open positions.
+  if (!existsSync(PORTFOLIO_PATH)) {
+    log('No paper_portfolio.json found — initializing fresh $10k paper account');
+    writeFileSync(PORTFOLIO_PATH, JSON.stringify({
+      account: { balance: 10000, initial_balance: 10000 },
+      open_positions: [],
+      pending_orders: [],
+      closed_trades: [],
+      stats: { total_trades: 0, wins: 0, losses: 0, partials: 0, total_pnl: 0, peak_balance: 10000, max_drawdown: 0, win_rate: 0, best_trade: 0, worst_trade: 0 }
+    }, null, 2));
+  }
+
   const allAlerts = [];
   const scans = [];
   const priceMap = {};
 
   for (const sym of WATCHLIST) {
     cli(`symbol ${sym}`);
-    sleep(1500);
 
-    const quote = cli('quote');
+    // Poll until the chart actually shows the requested symbol before trusting the
+    // quote. Slow symbol loads otherwise return the PREVIOUS symbol's price (on
+    // 2026-07-10 every symbol after NAS100 logged NAS100's price, 29846.6).
+    let quote = null;
+    for (let tries = 0; tries < 5; tries++) {
+      sleep(1500);
+      const q = cli('quote');
+      if (q && normalizeSymbol(q.symbol || '') === sym) { quote = q; break; }
+    }
+    if (!quote) log(`  ⚠ ${sym}: chart never showed this symbol — price skipped (stale-quote guard)`);
     const price = quote?.last || quote?.close || null;
     priceMap[sym] = price;
 
@@ -294,7 +315,7 @@ async function run() {
   const dataQuality = totalSyms > 0 ? symbolsWithData / totalSyms : 0;
 
   if (dataQuality < 0.3 && existsSync(SCAN_PATH)) {
-    log(`⚠️ Only ${symbolsWithData}/${totalSyms} symbols have study data (MCP offline?) — merging with last good scan`);
+    log(`⚠️ Only ${symbolsWithData}/${totalSyms} symbols have study data (Pro Trading V6 indicator not on chart, or table not yet rendered) — merging with last good scan`);
     const prev = JSON.parse(readFileSync(SCAN_PATH, 'utf8'));
     const prevMap = {};
     (prev.symbols || []).forEach(s => { prevMap[s.symbol] = s; });
@@ -312,7 +333,10 @@ async function run() {
   const result = {
     timestamp: new Date().toISOString(),
     data_quality: +(dataQuality * 100).toFixed(0),
-    mcp_status: dataQuality < 0.3 ? 'OFFLINE' : dataQuality < 0.8 ? 'DEGRADED' : 'OK',
+    // mcp_status reflects ENGINE/MCP connectivity (did quotes come back), NOT indicator data.
+    // data_quality (above) tracks study-data completeness separately. This previously said
+    // OFFLINE whenever the Pro Trading V6 indicator was missing -- a false alarm while CDP was up.
+    mcp_status: Object.values(priceMap).some(p => p != null) ? 'OK' : 'OFFLINE',
     symbols: scans,
     alerts: allAlerts,
     top_setups: scans.filter(s => s.score >= 6).map(s => `${s.symbol} ${s.direction} (score ${s.score})`),
@@ -370,8 +394,8 @@ async function run() {
     balance: pfNow.account.balance,
     unrealized: Math.round(unrealized * 100) / 100,
     total: Math.round((pfNow.account.balance + unrealized) * 100) / 100,
-    open_positions: pfNow.open_positions.length,
-    pending_orders: pfNow.pending_orders.length
+    open_positions: (pfNow.open_positions || []).length,
+    pending_orders: (pfNow.pending_orders || []).length
   });
   if (perf.snapshots.length > 100) perf.snapshots = perf.snapshots.slice(-100);
   writeFileSync(perfPath, JSON.stringify(perf, null, 2));
@@ -412,4 +436,12 @@ async function run() {
   return { alerts: allAlerts, top: result.top_setups };
 }
 
-run().catch(e => log(`ERROR: ${e.message}`));
+// --daemon: rescan every 4h (replaces the old crontab entry that broke when the
+// repo moved -- the scheduler now lives with the code, managed by manage.sh/watchdog).
+if (process.argv.includes('--daemon')) {
+  const EVERY = 4 * 60 * 60 * 1000;
+  run().catch(e => log(`ERROR: ${e.message}`));
+  setInterval(() => run().catch(e => log(`ERROR: ${e.message}`)), EVERY);
+} else {
+  run().catch(e => log(`ERROR: ${e.message}`));
+}

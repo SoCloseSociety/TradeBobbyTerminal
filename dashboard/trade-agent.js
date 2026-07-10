@@ -6,7 +6,7 @@
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'trade_brief.json');
@@ -469,7 +469,7 @@ function appendSentimentHistory(data, risk, regime) {
   };
   hist.snapshots.push(snap);
   hist.snapshots = hist.snapshots.slice(-96);  // 24h at 15min
-  writeFileSync(HIST, JSON.stringify(hist, null, 2));
+  writeJsonAtomic(HIST, hist);
   return hist;
 }
 
@@ -505,7 +505,7 @@ async function run() {
     }
   };
 
-  writeFileSync(OUT, JSON.stringify(brief, null, 2));
+  writeJsonAtomic(OUT, brief);
   writeFileSync(MD_OUT, toMarkdown(brief));
 
   log(`✅ Brief: ${regime.verdict} · ${ideas.length} ideas · ${divergences.length} divergences · top: ${ideas[0]?.grade || '—'} ${ideas[0]?.direction || ''} ${ideas[0]?.symbol || ''}`);

@@ -3,10 +3,9 @@
 // One-shot: node onchain-btc.js
 // Daemon: node onchain-btc.js --daemon
 
-import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic, readJsonSafe } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'onchain_btc.json');
@@ -15,14 +14,14 @@ const log = mkLogger(LOG);
 
 async function txt(url) {
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     return (await r.text()).trim();
   } catch { return null; }
 }
 async function json(url) {
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
@@ -72,6 +71,27 @@ async function run() {
     } : null,
   };
 
+  // Last-known-good merge: keep previous values for fields that failed this cycle,
+  // so a transient API failure never overwrites good data with nulls.
+  const FIELDS = ['hashrate_ghs', 'hashrate_ehs', 'difficulty', 'market_cap_satoshi',
+    'total_btc_satoshis', 'total_btc', 'block_height', 'avg_block_time_sec', 'fees'];
+  const allNull = FIELDS.every(k => out[k] === null || out[k] === undefined);
+  const prev = readJsonSafe(OUT);
+  if (allNull) {
+    log('⚠ All fetches failed — skipping write, keeping previous onchain_btc.json');
+    return prev;
+  }
+  if (prev) {
+    let carried = 0;
+    for (const k of FIELDS) {
+      if ((out[k] === null || out[k] === undefined) && prev[k] !== null && prev[k] !== undefined) {
+        out[k] = prev[k];
+        carried++;
+      }
+    }
+    if (carried > 0) log(`  ♻ carried ${carried} field(s) from previous run`);
+  }
+
   if (out.block_height) {
     out.halving = halvingInfo(out.block_height);
   }
@@ -83,6 +103,8 @@ async function run() {
     if (recent && oldest) {
       out.hashrate_trend_pct_3d = +(((recent - oldest) / oldest) * 100).toFixed(2);
     }
+  } else if (prev?.hashrate_trend_pct_3d !== undefined) {
+    out.hashrate_trend_pct_3d = prev.hashrate_trend_pct_3d;
   }
 
   // Network state classification
@@ -93,7 +115,7 @@ async function run() {
     else out.fee_state = 'CALM';
   }
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   log(`✅ Block ${out.block_height} · Hashrate ${out.hashrate_ehs} EH/s · Halving in ${out.halving?.daysToNext}d · Fees ${out.fee_state}`);
   return out;
 }

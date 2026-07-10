@@ -168,12 +168,16 @@ function run() {
 }
 
 if (process.argv.includes('--daemon')) {
-  // Generate immediately + then re-generate every Sunday 20:00 UTC+7 (13:00 UTC)
-  run();
+  // Generate immediately + then re-generate every Sunday 20:00 UTC+7 (13:00 UTC).
+  // try/catch so a throw can't kill the daemon; lastRunDate so the Sunday window fires once per day.
+  try { run(); } catch (e) { log('❌ ' + e.message); }
+  let lastRunDate = null;
   setInterval(() => {
     const utc = new Date();
-    if (utc.getUTCDay() === 0 && utc.getUTCHours() === 13 && utc.getUTCMinutes() < 5) {
-      run();
+    const today = utc.toISOString().substring(0, 10);
+    if (utc.getUTCDay() === 0 && utc.getUTCHours() === 13 && lastRunDate !== today) {
+      lastRunDate = today;
+      try { run(); } catch (e) { log('❌ ' + e.message); }
     }
   }, 5 * 60 * 1000);
 } else {

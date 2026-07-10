@@ -341,4 +341,9 @@ async function run() {
   log('═══ NEWS SCAN COMPLETE ═══');
 }
 
-run().catch(e => log(`ERROR: ${e.message}`));
+if (process.argv.includes('--daemon')) {
+  run().catch(e => log(`ERROR: ${e.message}`));
+  setInterval(() => run().catch(e => log(`ERROR: ${e.message}`)), 30 * 60 * 1000); // refresh every 30 min
+} else {
+  run().catch(e => log(`ERROR: ${e.message}`));
+}

@@ -7,10 +7,10 @@
 // One-shot: ANTHROPIC_API_KEY=sk-ant-... node claude-narrator.js
 // Daemon: node claude-narrator.js --daemon
 
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'claude_narrative.json');
@@ -63,7 +63,8 @@ async function callClaude(brief) {
         max_tokens: 600,
         system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: userMsg }]
-      })
+      }),
+      signal: AbortSignal.timeout(10000)
     });
     if (!r.ok) {
       log(`❌ Claude API ${r.status}: ${await r.text()}`);
@@ -87,7 +88,7 @@ async function run() {
       narrative: '_Claude narrator inactive — set ANTHROPIC_API_KEY env var to enable AI-generated regime narration._',
       configured: false
     };
-    writeFileSync(OUT, JSON.stringify(placeholder, null, 2));
+    writeJsonAtomic(OUT, placeholder);
     log('⏸ ANTHROPIC_API_KEY not set — wrote placeholder');
     return;
   }
@@ -106,7 +107,7 @@ async function run() {
     usage: result.usage,
     configured: true
   };
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   log('✅ narrative saved');
 }
 

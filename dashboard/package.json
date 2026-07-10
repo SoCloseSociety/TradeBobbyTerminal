@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "scan": "node scan.js"
+    "scan": "node scan.js",
+    "test": "node --test tests.mjs"
   },
   "dependencies": {
     "express": "^4.21.0"

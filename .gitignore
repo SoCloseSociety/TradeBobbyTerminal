@@ -40,7 +40,7 @@ dashboard/auto-scan.log
 *.swo
 
 # ── Backups ──
-*.bak
+*.bak*
 *.tmp
 
 # ── Local secrets / env ──
@@ -73,3 +73,10 @@ sessions/
 CLAUDE.md
 MARGIN_STRATEGY.md
 paper_portfolio.json
+
+# Neo connector artifacts -- managed by NeoBot self-heal, never commit (API map)
+NEO_CONNECTOR.md
+.claude/skills/neo-connector/
+dashboard/orderflow_crypto.json
+dashboard/orderflow_backtest.json
+dashboard/macro_context.json

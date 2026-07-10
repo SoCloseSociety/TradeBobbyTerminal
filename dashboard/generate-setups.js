@@ -4,16 +4,25 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Tolerant reader: sibling daemons rewrite these JSON files non-atomically, so a read during
+// a partial write used to throw here and kill the whole scan/auto-scan pipeline.
+function readJsonSafe(path, fallback = null) {
+  if (!existsSync(path)) return fallback;
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; }
+}
 const SCAN_PATH = join(__dirname, 'last_scan.json');
 const SETUPS_PATH = join(__dirname, 'live_setups.json');
 const PORTFOLIO_PATH = join(__dirname, '..', 'paper_portfolio.json');
 const HISTORY_PATH = join(__dirname, 'scan_history.json');
 
 function assetType(sym) {
-  if (['BTCUSD','ETHUSD','SOLUSD','XRPUSD'].includes(sym)) return 'crypto';
-  if (['XAUUSD','XAGUSD','USOIL','UKOIL'].includes(sym)) return 'commodity';
-  if (['NAS100','SPX500','DAX','CAC40'].includes(sym)) return 'index';
-  return 'forex';
+  const s = String(sym).toUpperCase();
+  if (['BTCUSD','ETHUSD','SOLUSD','XRPUSD','TOTAL','BTC.D'].includes(s)) return 'crypto';
+  if (['XAUUSD','XAGUSD','USOIL','UKOIL'].includes(s)) return 'commodity';
+  if (['NAS100','SPX500','US30','DAX','CAC40','UK100','JP225','DXY'].includes(s)) return 'index';
+  if (/^[A-Z]{6}$/.test(s)) return 'forex'; // 6-letter currency pair
+  return 'stock'; // single-name US equity (NVDA, AAPL, QQQ, ...)
 }
 
 function calcSize(riskUSD, riskPts, sym) {
@@ -31,6 +40,8 @@ function calcSize(riskUSD, riskPts, sym) {
     }
     case 'index':
       return { size: +(riskUSD / riskPts).toFixed(2), unit: 'contracts' };
+    case 'stock':
+      return { size: Math.max(0, Math.floor(riskUSD / riskPts)), unit: 'shares' };
     case 'commodity': {
       const multi = sym.includes('OIL') ? 10 : 1;
       return { size: +(riskUSD / (riskPts * multi)).toFixed(2), unit: 'lots' };
@@ -127,7 +138,7 @@ function calcMomentum(symbol, history) {
 
 // Record current scan in history (deduped by timestamp)
 function updateHistory(scan) {
-  let history = existsSync(HISTORY_PATH) ? JSON.parse(readFileSync(HISTORY_PATH, 'utf8')) : { scans: [] };
+  let history = readJsonSafe(HISTORY_PATH, { scans: [] });
   const prices = {};
   for (const s of (scan.symbols || [])) prices[s.symbol] = s.price;
   // Skip if we already recorded this exact scan (prevents 20× dup from repeat API calls)
@@ -142,16 +153,17 @@ function updateHistory(scan) {
 export function generateSetups() {
   if (!existsSync(SCAN_PATH)) return { setups: [], timestamp: null };
 
-  const scan = JSON.parse(readFileSync(SCAN_PATH, 'utf8'));
-  const pf = existsSync(PORTFOLIO_PATH) ? JSON.parse(readFileSync(PORTFOLIO_PATH, 'utf8')) : null;
+  const scan = readJsonSafe(SCAN_PATH);
+  if (!scan) return { setups: [], timestamp: null }; // torn/corrupt scan file: degrade like a missing one
+  const pf = readJsonSafe(PORTFOLIO_PATH);
 
   // Load macro context for geopolitical scoring
   const macroPath = join(__dirname, 'macro_context.json');
-  const macro = existsSync(macroPath) ? JSON.parse(readFileSync(macroPath, 'utf8')) : null;
+  const macro = readJsonSafe(macroPath);
 
   // Load live news sentiment (from news-scanner.js)
   const newsPath = join(__dirname, 'news_feed.json');
-  const news = existsSync(newsPath) ? JSON.parse(readFileSync(newsPath, 'utf8')) : null;
+  const news = readJsonSafe(newsPath);
   const newsAge = news?.timestamp ? (Date.now() - new Date(news.timestamp).getTime()) / 60000 : Infinity;
   const newsFresh = newsAge < 60; // use news sentiment only if <60min old
 
@@ -168,7 +180,7 @@ export function generateSetups() {
   for (const p of (pf?.open_positions || [])) { if (!CLOSED_STATUSES.includes(p.status)) openSymbols.add(p.symbol); }
   for (const p of (pf?.pending_orders || [])) { if (p.status === 'PENDING') openSymbols.add(p.symbol); }
   const rtPath = join(__dirname, 'real_trades.json');
-  const rt = existsSync(rtPath) ? JSON.parse(readFileSync(rtPath, 'utf8')) : { trades: [] };
+  const rt = readJsonSafe(rtPath, { trades: [] });
   for (const t of (rt.trades || [])) { if (t.status === 'OPEN') openSymbols.add(t.symbol); }
   const slotsAvail = 3 - openSymbols.size;
 
@@ -241,7 +253,7 @@ export function generateSetups() {
 
     // ── NEW: MARKET REGIME FILTER ──
     if (regime.bias === 'RISK-ON') {
-      if (direction === 'LONG' && ['BTCUSD','ETHUSD','SOLUSD','XRPUSD','NAS100','SPX500','DAX','CAC40'].includes(s.symbol)) {
+      if (direction === 'LONG' && (['NAS100','SPX500','US30','DAX'].includes(s.symbol) || assetType(s.symbol) === 'stock')) {
         score += 1;
         reasons.push('Risk-ON favorable (long risk assets)');
       }
@@ -255,14 +267,14 @@ export function generateSetups() {
         score += 1;
         reasons.push('Risk-OFF favorable (long safe haven)');
       }
-      if (direction === 'SHORT' && ['BTCUSD','ETHUSD','NAS100','SPX500','DAX','CAC40'].includes(s.symbol)) {
+      if (direction === 'SHORT' && (['NAS100','SPX500','US30','DAX'].includes(s.symbol) || assetType(s.symbol) === 'stock')) {
         score += 1;
         reasons.push('Risk-OFF favorable (short risk assets)');
       }
     }
 
     // ── INDICES SPECIFIC: respect session opens strongly ──
-    const indices = ['NAS100','SPX500','DAX','CAC40'];
+    const indices = ['NAS100','SPX500','US30','DAX'];
     if (indices.includes(s.symbol)) {
       // Indices react to session opens — extra points if during London/NY
       if (session === 'LONDON' || session === 'NY' || session === 'KILLZONE') {
@@ -291,10 +303,10 @@ export function generateSetups() {
     }
 
     // ── NEW: SESSION CONTEXT ──
-    const indexes = ['NAS100','SPX500','DAX','CAC40'];
+    const indexes = ['NAS100','SPX500','US30','DAX'];
     const forex = ['EURUSD','GBPUSD','GBPJPY','USDJPY'];
     if (session === 'KILLZONE' || session === 'NY') {
-      if (indexes.includes(s.symbol) || forex.includes(s.symbol)) {
+      if (indexes.includes(s.symbol) || forex.includes(s.symbol) || assetType(s.symbol) === 'stock') {
         score += 1;
         reasons.push(session + ' session optimal');
       }

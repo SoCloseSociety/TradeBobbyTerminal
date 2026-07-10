@@ -3,10 +3,9 @@
 // One-shot: node cot-fetcher.js
 // Daemon (every 24h, since CFTC publishes weekly Friday): node cot-fetcher.js --daemon
 
-import { writeFileSync, existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic, readJsonSafe } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'cot.json');
@@ -41,7 +40,7 @@ async function fetchLatest(matchString, weeks = 8) {
   // Get last N weeks for trend analysis
   const url = `https://publicreporting.cftc.gov/resource/6dca-aqww.json?$limit=${weeks}&$where=market_and_exchange_names%20like%20%27%25${encodeURIComponent(matchString)}%25%27&$order=report_date_as_yyyy_mm_dd%20DESC`;
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const arr = await r.json();
     return arr;
@@ -127,12 +126,28 @@ async function run() {
     await new Promise(r => setTimeout(r, 200));
   }
 
+  // Last-known-good carry-over: if this run yielded fewer markets than the previous
+  // cot.json, keep the previous entries for the missing markets (marked carried:true)
+  // so downstream signals don't flicker on transient Socrata failures.
+  const prev = readJsonSafe(OUT);
+  if (prev?.markets?.length) {
+    const have = new Set(out.markets.map(m => m.asset));
+    let carried = 0;
+    for (const pm of prev.markets) {
+      if (!have.has(pm.asset)) {
+        out.markets.push({ ...pm, carried: true });
+        carried++;
+      }
+    }
+    if (carried > 0) log(`  ♻ carried ${carried} market(s) from previous run`);
+  }
+
   // Latest report date
   const dates = out.markets.map(m => m.latest?.date).filter(Boolean);
   out.report_date = dates.sort().reverse()[0];
   out.report_count = out.markets.length;
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   log(`✅ COT ${out.report_count} markets · report ${out.report_date}`);
   return out;
 }

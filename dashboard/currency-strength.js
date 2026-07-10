@@ -5,10 +5,10 @@
 //   node currency-strength.js
 // Daemon: node currency-strength.js --daemon
 
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCAN = join(__dirname, 'last_scan.json');
@@ -37,7 +37,7 @@ async function run() {
   const macro = readJSON(MACRO);
   if (!scan?.symbols) {
     log('⚠ No scan data');
-    writeFileSync(OUT, JSON.stringify({ note: 'Need scan data', timestamp: new Date().toISOString() }, null, 2));
+    writeJsonAtomic(OUT, { note: 'Need scan data', timestamp: new Date().toISOString() });
     return;
   }
 
@@ -117,7 +117,7 @@ async function run() {
     note: 'Based on TF_240 HTF bias from scan (BULL/BEAR/NEUTRAL). DXY macro overlay for USD if available.'
   };
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   const r = ranking.map(x => x.currency + '=' + x.strength).join(' ');
   log(`✅ ${r}` + (bestPair ? ` · best: ${bestPair.direction} ${bestPair.pair}` : ''));
   return out;

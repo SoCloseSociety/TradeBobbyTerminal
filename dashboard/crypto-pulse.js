@@ -3,10 +3,9 @@
 // One-shot: node crypto-pulse.js
 // Daemon (every 5min): node crypto-pulse.js --daemon
 
-import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'crypto_pulse.json');
@@ -15,7 +14,7 @@ const log = mkLogger(LOG);
 
 async function safeFetch(url) {
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
@@ -23,7 +22,7 @@ async function safeFetch(url) {
 
 async function fearGreed() {
   const j = await safeFetch('https://api.alternative.me/fng/?limit=8');
-  if (!j?.data) return null;
+  if (!j?.data?.length) return null;
   const items = j.data.map(d => ({
     value: parseInt(d.value, 10),
     classification: d.value_classification,
@@ -124,7 +123,7 @@ async function run() {
     else out.funding_signal = 'BTC funding balanced';
   }
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   log(`✅ F&G ${fg?.current||'—'} (${fg?.classification||''}) · BTC dom ${dom?.btc_dominance||'—'}% · regime ${regime}`);
   return out;
 }

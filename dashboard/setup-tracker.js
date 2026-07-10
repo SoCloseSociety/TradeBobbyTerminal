@@ -30,8 +30,10 @@ function writeJSON(path, data) {
 // Setup expires after this many hours if not hit
 const EXPIRY_HOURS = 96;  // 4 days
 
-function makeId(s, ts) {
-  return `${s.symbol}_${s.direction}_${Math.round(s.entry * 1000)}_${ts}`;
+// No timestamp in the id: generate-setups rewrites live_setups.json with a fresh timestamp each scan,
+// so a ts-based id re-registered the SAME still-valid setup every cycle (duplicate OPEN history entries).
+function makeId(s) {
+  return `${s.symbol}_${s.direction}_${Math.round(s.entry * 1000)}`;
 }
 
 function checkOutcome(setup, currentPrice) {
@@ -53,7 +55,15 @@ function checkOutcome(setup, currentPrice) {
 
 function computeStats(history) {
   const closed = history.filter(h => h.status === 'CLOSED');
-  if (closed.length === 0) return { total: 0, wins: 0, losses: 0, win_rate: 0 };
+  // Full zeroed shape: the dashboard panel reads total_open/total_closed/total_r and rendered "undefined" otherwise
+  if (closed.length === 0) return {
+    total_closed: 0,
+    total_open: history.filter(h => h.status === 'OPEN').length,
+    wins: 0, losses: 0, win_rate: 0, total_r: 0, avg_r_per_trade: 0,
+    by_quality: {}, by_symbol: {},
+    long: { total: 0, win_rate: 0 }, short: { total: 0, win_rate: 0 },
+    last_updated: new Date().toISOString()
+  };
   const wins = closed.filter(h => h.outcome === 'TP2_HIT' || (h.outcome === 'TP1_HIT' && h.r_multiple > 0)).length;
   const losses = closed.filter(h => h.outcome === 'SL_HIT').length;
   const totalR = closed.reduce((a, h) => a + (h.r_multiple || 0), 0);
@@ -121,7 +131,7 @@ async function run() {
   // 1. Add new setups
   let newCount = 0;
   for (const s of (setups.setups || [])) {
-    const id = makeId(s, setups.timestamp);
+    const id = makeId(s);
     if (existingIds.has(id)) continue;
     history.setups.push({
       id,

@@ -127,11 +127,21 @@ function buildCalendar() {
   };
 }
 
-const data = buildCalendar();
-writeFileSync(OUT, JSON.stringify(data, null, 2));
-log(`Generated ${data.total} events (next 30d)`);
-const upcoming = data.events.filter(e => new Date(e.datetime) > new Date()).slice(0, 5);
-upcoming.forEach(e => {
-  const dt = new Date(e.datetime);
-  log(`  [${e.impact}] ${dt.toUTCString().substring(0, 22)} - ${e.name}`);
-});
+function run() {
+  const data = buildCalendar();
+  writeFileSync(OUT, JSON.stringify(data, null, 2));
+  log(`Generated ${data.total} events (next 30d)`);
+  const upcoming = data.events.filter(e => new Date(e.datetime) > new Date()).slice(0, 5);
+  upcoming.forEach(e => {
+    const dt = new Date(e.datetime);
+    log(`  [${e.impact}] ${dt.toUTCString().substring(0, 22)} - ${e.name}`);
+  });
+}
+
+// --daemon: regenerate daily (replaces the old crontab entry that broke when the repo moved).
+if (process.argv.includes('--daemon')) {
+  run();
+  setInterval(run, 24 * 60 * 60 * 1000);
+} else {
+  run();
+}

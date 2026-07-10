@@ -5,10 +5,9 @@
 // One-shot: node reddit-mania.js
 // Daemon (every 30min): node reddit-mania.js --daemon
 
-import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic, readJsonSafe } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'reddit_mania.json');
@@ -41,13 +40,23 @@ const TICKER_RE = /\$?\b[A-Z]{2,5}\b/g;
 const CRYPTO_RE = /\$?\b(BTC|ETH|SOL|XRP|DOGE|ADA|MATIC|LINK|AVAX|DOT|SUI|TON|ATOM|UNI|FIL|NEAR|APT|TIA)\b/g;
 
 async function fetchSub(sub, limit) {
-  const url = `https://www.reddit.com/r/${sub}/new.json?limit=${limit}`;
+  // old.reddit.com is far less aggressive about blocking script user agents than www.
+  const url = `https://old.reddit.com/r/${sub}/new.json?limit=${limit}`;
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'TradeBobby/1.0 (research)' } });
-    if (!r.ok) return [];
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'tradebobby/1.0 (macOS; monitoring script)' },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!r.ok) {
+      log(`  ⚠ r/${sub} HTTP ${r.status}`);
+      return [];
+    }
     const j = await r.json();
     return (j?.data?.children || []).map(c => c.data);
-  } catch { return []; }
+  } catch (e) {
+    log(`  ⚠ r/${sub} fetch error: ${e.message}`);
+    return [];
+  }
 }
 
 function extractTickers(text) {
@@ -88,6 +97,19 @@ async function run() {
     await new Promise(r => setTimeout(r, 500)); // be polite
   }
 
+  // All subs failed → keep previous mania data instead of writing fake zeros
+  if (totalPosts === 0) {
+    const prev = readJsonSafe(OUT, {});
+    const out = {
+      ...prev,
+      timestamp: new Date().toISOString(),
+      error: 'all subreddit fetches failed'
+    };
+    writeJsonAtomic(OUT, out);
+    log('❌ All subreddit fetches failed — kept previous mania data');
+    return out;
+  }
+
   // Top tickers
   const ranked = Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
@@ -95,7 +117,8 @@ async function run() {
     .map(([t, c]) => ({ ticker: t, mentions: c, samples: recent[t] || [] }));
 
   // Compare with previous run for spike detection
-  let history = existsSync(HISTORY) ? JSON.parse(readFileSync(HISTORY, 'utf8')) : { snapshots: [] };
+  let history = readJsonSafe(HISTORY, { snapshots: [] });
+  if (!Array.isArray(history.snapshots)) history = { snapshots: [] };
   const lastSnapshot = history.snapshots[history.snapshots.length - 1] || { counts: {} };
   const spikes = ranked.map(r => {
     const prevC = lastSnapshot.counts[r.ticker] || 0;
@@ -112,7 +135,7 @@ async function run() {
     counts: Object.fromEntries(ranked.map(r => [r.ticker, r.mentions]))
   });
   history.snapshots = history.snapshots.slice(-48); // keep last 48 snapshots (~24h at 30min)
-  writeFileSync(HISTORY, JSON.stringify(history, null, 2));
+  writeJsonAtomic(HISTORY, history);
 
   // Mania classification
   const totalMentions = ranked.reduce((a, r) => a + r.mentions, 0);
@@ -130,7 +153,7 @@ async function run() {
     note: 'Mention spike (delta > prev) = retail attention surge = often contrarian signal'
   };
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   const top5 = ranked.slice(0, 5).map(r => r.ticker + '=' + r.mentions).join(' ');
   log(`✅ ${totalPosts} posts · ${totalMentions} mentions · ${maniaLevel} · top: ${top5}`);
   return out;

@@ -25,7 +25,7 @@ TradeBobby is a **research desk in a box** for systematic discretionary traders 
 - 📡 **What just happened** (live news triggers + sentiment shifts)
 - 🏛 **Who's positioned how** (CFTC COT extremes, retail mania spikes, ETF flows)
 - 🎯 **Where the highest-quality setup is forming** (multi-source synthesis with conviction scoring)
-- ⏱ **What's about to hit** (next catalyst countdown — NFP, CPI, FOMC, earnings)
+- ⏱ **What's about to hit** (next catalyst countdown -- NFP, CPI, FOMC, earnings)
 
 It does **not** execute trades, send orders, or manage your capital. It's a decision support tool. You stay in the driver's seat.
 
@@ -44,8 +44,8 @@ It does **not** execute trades, send orders, or manage your capital. It's a deci
 │ ⏱ NEXT CATALYST T-4h 32m · NFP 13:30 UTC → DXY/Gold/NAS/USDJPY        │
 │ 🚨 SETUP A+ LONG XAGUSD entry $32.18 SL $31.40 TP2 $34.50 score 9     │
 ├───────────────────────────────────────────────────────────────────────┤
-│ 🤖 Agent Brief — multi-source synthesis (Regime + Top 4 ideas + ...)  │
-│ 📡 Market Wrap — narrative auto-generated, Bloomberg style             │
+│ 🤖 Agent Brief -- multi-source synthesis (Regime + Top 4 ideas + ...)  │
+│ 📡 Market Wrap -- narrative auto-generated, Bloomberg style             │
 ├──────────┬────────────┬──────────────┬──────────────────────────────┤
 │ 🎚 Risk  │ ⚙️ State  │ 🎯 Top Sig   │ ⭐ Watchlist  │ ⚡ Killzones    │
 │ Index    │ regime    │ live entry   │ starred syms  │ live timers     │
@@ -96,7 +96,7 @@ Drop it on any TradingView chart, get:
 - Killzone background highlights (Asia / London / NY overlap)
 - HTF FVG projection (4H + Daily projected onto current TF)
 - Breaker blocks · Inverse FVG · Mitigation blocks · Liquidity voids
-- ⭐ **Stacked Confluence Zones** — flag when 3+ structures overlap
+- ⭐ **Stacked Confluence Zones** -- flag when 3+ structures overlap
 
 See [PINE_V6_CHANGELOG.md](PINE_V6_CHANGELOG.md) for module-by-module breakdown.
 
@@ -282,10 +282,10 @@ Copy [`Pro_Trading_System_V5.pine`](Pro_Trading_System_V5.pine) into TradingView
 | 1 | 🟥 VIX Risk Filter | tints background when VIX > threshold, optional block longs | 3 |
 | 2 | 📊 Anchored VWAP | Daily + Weekly + optional std-dev bands | 4 |
 | 3 | ⚡ Killzone background | Asia / London / NY overlap highlights | 2 |
-| 4 | 🔄 Breaker Blocks | OBs broken in opposite direction → reversed S/R | — |
+| 4 | 🔄 Breaker Blocks | OBs broken in opposite direction → reversed S/R | -- |
 | 5 | 🧭 Multi-TF Bias | D + 4H + 1H + Cur EMA alignment composite | 3 |
 | 6 | ↔️ Inverse FVG | FVGs closed-through invert their role | 1 |
-| 7 | 🎯 OTE Swing zone | auto-draws Fib 0.62-0.79 from latest swing | — |
+| 7 | 🎯 OTE Swing zone | auto-draws Fib 0.62-0.79 from latest swing | -- |
 | 8 | 🚫 News Blackout | suppresses signals around NFP/CPI/FOMC/ECB | 2 |
 | 9 | 🔱 Power of 3 (AMD) | Asia accumulation / London manipulation / NY distribution | 2 |
 | 10 | 📈 HTF FVG | 4H + Daily FVGs projected on current chart | 4 |
@@ -385,7 +385,7 @@ TradeBobby/
 
 ## 🔑 Setup A+ checklist (V6)
 
-The dashboard cross-checks all of these — when most are ✅, you have an institutional-grade setup:
+The dashboard cross-checks all of these -- when most are ✅, you have an institutional-grade setup:
 
 - [ ] V5 Confluence ≥ 6/10 (dashboard row 14)
 - [ ] MTF Aligned 4/4 (dashboard row 20)
@@ -394,7 +394,7 @@ The dashboard cross-checks all of these — when most are ✅, you have an insti
 - [ ] HTF FVG (4H or Daily) overlaps entry
 - [ ] Killzone NY overlap active (green background on Pine chart)
 - [ ] VIX not stressed (no red background)
-- [ ] P3 phase = DISTRIBUTION (NY) — not Manipulation (London Judas)
+- [ ] P3 phase = DISTRIBUTION (NY) -- not Manipulation (London Judas)
 - [ ] Not in News Blackout window
 - [ ] OTE zone overlaps the entry
 - [ ] Entry trigger present: OB / FVG / Breaker / IFVG / Mitigation / Void
@@ -442,18 +442,18 @@ Templates provided for personal configs:
 
 Built for **ICT/SMC** discretionary macro traders. Core principles baked in:
 
-- **Never move SL to breakeven before TP1** — ICT retraces to entry before the real move
-- **Discount/Premium zones** — long only in discount, short only in premium (configurable)
-- **Killzones first** — best signals during London (14:00-18:00 UTC+7) and NY overlap (19:00-22:00 UTC+7)
-- **HTF bias filter** — multi-timeframe alignment (D + 4H + 1H + Cur)
+- **Never move SL to breakeven before TP1** -- ICT retraces to entry before the real move
+- **Discount/Premium zones** -- long only in discount, short only in premium (configurable)
+- **Killzones first** -- best signals during London (14:00-18:00 UTC+7) and NY overlap (19:00-22:00 UTC+7)
+- **HTF bias filter** -- multi-timeframe alignment (D + 4H + 1H + Cur)
 - **Risk per trade** capped at 1% (configurable per profile)
 - **Macro narrative > pure TA** for commodities (gold/silver/oil ridden by geopolitics)
 
 Profiles available for different styles:
-- 🏃 **Scalp** — intraday, killzone-only, 0.5% risk, tight stops
-- 🐢 **Swing** — multi-day on 4H/Daily, 1% risk, 2.5 R:R minimum
-- 🔥 **Aggressive** — frequent, 2% risk, 4+ confluence minimum
-- 🛡 **Conservative** — A+ only, 0.5% risk, MTF aligned required, VIX < 22
+- 🏃 **Scalp** -- intraday, killzone-only, 0.5% risk, tight stops
+- 🐢 **Swing** -- multi-day on 4H/Daily, 1% risk, 2.5 R:R minimum
+- 🔥 **Aggressive** -- frequent, 2% risk, 4+ confluence minimum
+- 🛡 **Conservative** -- A+ only, 0.5% risk, MTF aligned required, VIX < 22
 
 ---
 
@@ -491,9 +491,9 @@ nohup bash dashboard/watchdog.sh --loop &           # continuous (60s)
 See [`NEXT_PHASES.md`](NEXT_PHASES.md) for the full 15-phase roadmap. Current status:
 
 - ✅ **Phases 0-13** shipped (terminal, 14 daemons, Pine V6, alerts, profiles, backtester, pattern analyzer, narrators)
-- 🚧 **Phase 9** — UI polish (mobile-responsive, drag-resize, themes)
-- 🚧 **Phase 14** — Mobile companion app
-- 🚧 **Phase 15** — Docker compose + CI/CD
+- 🚧 **Phase 9** -- UI polish (mobile-responsive, drag-resize, themes)
+- 🚧 **Phase 14** -- Mobile companion app
+- 🚧 **Phase 15** -- Docker compose + CI/CD
 
 Open to contributions on any phase. Open an issue first to align on scope.
 
@@ -508,13 +508,13 @@ bash dashboard/smoke-test.sh
 # Must pass 86/86 with 0 failures
 ```
 
-Style guide: match the existing terse French/English mix in code comments — code is read more than written, so make it scannable. Pine code follows the V5 conventions documented in the changelog.
+Style guide: match the existing terse French/English mix in code comments -- code is read more than written, so make it scannable. Pine code follows the V5 conventions documented in the changelog.
 
 ---
 
 ## 📜 License
 
-MIT — see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE).
 
 This is research software. **Use at your own risk.** Past performance does not guarantee future results. Markets can stay irrational longer than you can stay solvent. The COT pctile 100 you fade today might rip another 5% before reversing. Always size positions you can survive being wrong about.
 

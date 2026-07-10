@@ -4,10 +4,9 @@
 // One-shot: node earnings-cal.js
 // Daemon: node earnings-cal.js --daemon
 
-import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'earnings_cal.json');
@@ -45,7 +44,7 @@ function fmtDate(d) {
 async function fetchDate(dateStr) {
   const url = `https://api.nasdaq.com/api/calendar/earnings?date=${dateStr}`;
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return [];
     const j = await r.json();
     return j?.data?.rows || [];
@@ -87,7 +86,7 @@ async function run() {
   out.events.sort((a, b) => a.date.localeCompare(b.date));
   out.mag7.sort((a, b) => a.date.localeCompare(b.date));
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   log(`✅ ${out.events.length} key earnings · ${out.mag7.length} Mag-7 in next 14 days`);
   return out;
 }

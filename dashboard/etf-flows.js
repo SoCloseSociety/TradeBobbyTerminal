@@ -5,10 +5,9 @@
 // One-shot: node etf-flows.js
 // Daemon (every 30min): node etf-flows.js --daemon
 
-import { writeFileSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic, readJsonSafe } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'etf_flows.json');
@@ -43,7 +42,7 @@ const ETFS = [
 async function fetchETF(ticker) {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=5d&interval=1d`;
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const j = await r.json();
     const meta = j?.chart?.result?.[0]?.meta;
@@ -80,6 +79,20 @@ async function run() {
     await new Promise(r => setTimeout(r, 150));
   }
 
+  // Last-known-good merge: keep ETFs from the previous file that failed this cycle,
+  // so a transient Yahoo outage never writes "0 ETFs" over good data.
+  const prev = readJsonSafe(OUT);
+  if (prev?.etfs) {
+    let carried = 0;
+    for (const e of ETFS) {
+      if (!out.etfs[e.ticker] && prev.etfs[e.ticker]) {
+        out.etfs[e.ticker] = { ...prev.etfs[e.ticker], stale: true };
+        carried++;
+      }
+    }
+    if (carried > 0) log(`  ♻ carried ${carried} ETF(s) from previous run`);
+  }
+
   // Aggregate by group
   for (const e of ETFS) {
     const x = out.etfs[e.ticker];
@@ -110,7 +123,7 @@ async function run() {
     risk_appetite: riskon > 0.5 ? 'GROWTH-BID' : riskon < -0.5 ? 'GROWTH-SOLD' : 'NEUTRAL'
   };
 
-  writeFileSync(OUT, JSON.stringify(out, null, 2));
+  writeJsonAtomic(OUT, out);
   log(`✅ ${Object.keys(out.etfs).length} ETFs · BTC flow ${out.signals.btc_inst_flow} · credit ${out.signals.credit_appetite}`);
   return out;
 }

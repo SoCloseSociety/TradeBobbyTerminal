@@ -13,9 +13,16 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
+# Load local secrets (gitignored .env) so daemons inherit API keys
+# (ANTHROPIC_API_KEY for claude-narrator, TELEGRAM_*/DISCORD_* for alerts, etc.).
+if [ -f "$SCRIPT_DIR/.env" ]; then set -a; . "$SCRIPT_DIR/.env"; set +a; fi
+
 DAEMONS=(
   "macro-pulse"
+  "macro-context"
   "crypto-pulse"
+  "orderflow-crypto"
+  "news-scanner"
   "cot-fetcher"
   "onchain-btc"
   "earnings-cal"
@@ -28,6 +35,8 @@ DAEMONS=(
   "claude-narrator"
   "tts-narrator"
   "weekly-brief"
+  "auto-scan"
+  "econ-calendar"
 )
 
 CMD="${1:-status}"
@@ -35,7 +44,7 @@ TARGET="${2:-}"
 
 start_daemon() {
   local d="$1"
-  if ps -ax -o command | grep -q "node $d.js --daemon" 2>/dev/null; then
+  if pgrep -f "node $d.js --daemon" >/dev/null 2>&1; then
     echo "  ⏭  $d already running"
   else
     nohup node "$d.js" --daemon > "$d.log" 2>&1 &
@@ -46,7 +55,7 @@ start_daemon() {
 
 stop_daemon() {
   local d="$1"
-  if pkill -f "$d.js --daemon" 2>/dev/null; then
+  if pkill -f "node $d.js --daemon" 2>/dev/null; then
     echo "  🛑 $d stopped"
   else
     echo "  ⏭  $d not running"
@@ -117,7 +126,7 @@ case "$CMD" in
       echo "🔴 dashboard       DOWN"
     fi
     for d in "${DAEMONS[@]}"; do
-      if ps -ax -o command | grep -q "node $d.js --daemon" 2>/dev/null; then
+      if pgrep -f "node $d.js --daemon" >/dev/null 2>&1; then
         echo "🟢 $d daemon"
       else
         echo "🔴 $d daemon DOWN"

@@ -5,10 +5,10 @@
 // One-shot: node setup-alerter.js
 // Daemon: node setup-alerter.js --daemon
 
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic } from './_log-helper.js';
 import { exec } from 'child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,9 +24,11 @@ function readJSON(p) {
 }
 
 function notifyMac(title, message) {
-  // Use osascript on macOS for native notification
-  const t = title.replace(/"/g, '\\"');
-  const m = message.replace(/"/g, '\\"');
+  // Use osascript on macOS for native notification.
+  // Strip shell/AppleScript metacharacters (like tts-narrator.js) — the string is
+  // interpolated into a shell command, so quotes/backticks/$ must never survive.
+  const t = title.replace(/['"`$\\]/g, '');
+  const m = message.replace(/['"`$\\]/g, '');
   exec(`osascript -e 'display notification "${m}" with title "${t}" sound name "Funk"'`,
     (err) => { if (err) log('  ⚠ osascript: ' + err.message); });
 }
@@ -54,7 +56,7 @@ async function notifyDiscord(alert) {
     }]
   };
   try {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
     if (!r.ok) log(`  ⚠ Discord webhook ${r.status}`);
   } catch (e) {
     log('  ⚠ Discord webhook error: ' + e.message);
@@ -76,7 +78,8 @@ async function notifyTelegram(alert) {
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+      signal: AbortSignal.timeout(10000)
     });
     if (!r.ok) log(`  ⚠ Telegram ${r.status}`);
   } catch (e) {
@@ -140,13 +143,13 @@ async function run() {
   // Persist state
   state.seen = Array.from(seen);
   state.lastRun = new Date().toISOString();
-  writeFileSync(STATE, JSON.stringify(state, null, 2));
+  writeJsonAtomic(STATE, state);
 
   // Persist pending alerts (last 12 — dashboard will pick these up and show as banner)
   let pending = readJSON(PENDING) || { alerts: [] };
   pending.alerts = [...newAlerts, ...pending.alerts].slice(0, 12);
   pending.timestamp = new Date().toISOString();
-  writeFileSync(PENDING, JSON.stringify(pending, null, 2));
+  writeJsonAtomic(PENDING, pending);
 
   if (newAlerts.length > 0) {
     log(`✅ ${newAlerts.length} new alert(s) fired`);

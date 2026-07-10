@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { loadWatchlist } from './load-rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Path to the TradingView MCP Jackson installation.
@@ -11,12 +12,8 @@ const MCP_DIR = process.env.TV_MCP_DIR || join(process.env.HOME || '~', 'trading
 const PORTFOLIO_PATH = join(__dirname, '..', 'paper_portfolio.json');
 const SCAN_PATH = join(__dirname, 'last_scan.json');
 
-const WATCHLIST = [
-  'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD',
-  'XAUUSD', 'EURUSD', 'GBPUSD', 'GBPJPY', 'USDJPY',
-  'NAS100', 'SPX500',
-  'USOIL'
-];
+// Watchlist comes from rules.json (single source of truth); fallback if unreadable.
+const WATCHLIST = loadWatchlist(['XAUUSD','EURUSD','GBPUSD','USDJPY','NAS100','SPX500','US30','DAX','NVDA','AAPL','TSLA','QQQ']);
 
 function cli(cmd) {
   try {

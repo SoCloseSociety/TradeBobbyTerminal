@@ -99,13 +99,14 @@ async function getMockPositions() {
   if (!existsSync(rtPath)) return { balance: 0, positions: [], orders: [], note: 'MOCK: no real_trades.json' };
   const rt = JSON.parse(readFileSync(rtPath, 'utf8'));
   const open = (rt.trades || []).filter(t => t.status === 'OPEN');
+  const mockBalance = parseFloat(process.env.MOCK_BALANCE || '10000');
   return {
-    balance: 200, // small account baseline
-    equity: 200,
+    balance: mockBalance,
+    equity: mockBalance,
     margin: 0,
-    freeMargin: 200,
-    currency: 'EUR',
-    leverage: 500,
+    freeMargin: mockBalance,
+    currency: process.env.MOCK_CURRENCY || 'USD',
+    leverage: parseInt(process.env.MOCK_LEVERAGE || '100', 10),
     note: 'MOCK mode: derived from real_trades.json (set BROKER_MODE=metaapi with real creds to go live)',
     positions: open.map(t => ({
       id: t.id,

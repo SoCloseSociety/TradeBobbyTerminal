@@ -7,9 +7,24 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
+# Cron strips the user PATH, so resolve node explicitly (nvm install first, then system).
+if ! command -v node >/dev/null 2>&1; then
+  for cand in "$HOME"/.nvm/versions/node/*/bin /opt/homebrew/bin /usr/local/bin; do
+    [ -x "$cand/node" ] && PATH="$cand:$PATH" && break
+  done
+fi
+export PATH
+
+# Load local secrets so restarted daemons inherit API keys (same as manage.sh).
+if [ -f "$SCRIPT_DIR/.env" ]; then set -a; . "$SCRIPT_DIR/.env"; set +a; fi
+
+# Keep in sync with DAEMONS in manage.sh.
 DAEMONS=(
   "macro-pulse.js --daemon"
+  "macro-context.js --daemon"
   "crypto-pulse.js --daemon"
+  "orderflow-crypto.js --daemon"
+  "news-scanner.js --daemon"
   "cot-fetcher.js --daemon"
   "onchain-btc.js --daemon"
   "earnings-cal.js --daemon"
@@ -18,6 +33,12 @@ DAEMONS=(
   "reddit-mania.js --daemon"
   "setup-alerter.js --daemon"
   "trade-agent.js --daemon"
+  "etf-flows.js --daemon"
+  "claude-narrator.js --daemon"
+  "tts-narrator.js --daemon"
+  "weekly-brief.js --daemon"
+  "auto-scan.js --daemon"
+  "econ-calendar.js --daemon"
 )
 
 check_and_restart() {
@@ -38,10 +59,11 @@ check_and_restart() {
   # Check each daemon by full command match
   for d in "${DAEMONS[@]}"; do
     local script="${d%% *}"
-    if ! ps -ax -o command | grep -q "node $d" 2>/dev/null; then
+    # pgrep -f self-excludes; the old ps|grep matched its own grep line so a dead daemon was NEVER detected
+    if ! pgrep -f "node $d" >/dev/null 2>&1; then
       echo "[$now] ❌ $script DEAD — restarting"
       local log="${script%.js}.log"
-      nohup node $d > "$log" 2>&1 &
+      nohup node $d >> "$log" 2>&1 &
       disown
       started=$((started + 1))
     fi

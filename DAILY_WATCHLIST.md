@@ -1,237 +1,59 @@
-# 📊 TradeBobby — Daily Watchlist (V6 Pine Script + Macro)
+# Daily Watchlist -- Evidence-Based (rewritten 2026-06-21)
 
-**Liste complète des charts à scanner chaque jour sur TradingView avec Pro_Trading_System_V5.pine appliqué.**
+Daily scan list aligned with `rules.json`, `PLAYBOOK.md` and `RESEARCH_FINDINGS.md` (control room: `~/Documents/VsCodeN30/tradingviewcheck/`).
 
-Style ICT/SMC, UTC+7 Koh Samui. Best session: London/NY overlap **20:30-23:00 UTC+7**.
+No em dashes in this repo by convention. Use "--".
 
-## 🎯 Routine quotidienne
+## Mindset first
 
-1. **Pré-Asia (avant 03:00 UTC+7)**: Check tier 1 macro (DXY, VIX, US10Y, gold, oil)
-2. **Asia (03:00-14:00 UTC+7)**: Build Asian range, no trade, observation
-3. **Pré-London (12:00-14:00 UTC+7)**: Note Asia high/low, identifie liquidité ciblée
-4. **London (14:00-18:00 UTC+7)**: Premier impulse — souvent fake (Judas swing)
-5. **LN/NY Overlap (20:30-23:00 UTC+7) ⚡ PRIME**: Best setups
-6. **NY (22:00-03:00 UTC+7)**: Continuation ou retournement
+The evidence is blunt: >80% of active retail traders lose, <1% are persistently profitable, and ICT/SMC is unproven. This file is not a signal generator. It exists to keep the daily process tight: few instruments, few timeframes, strict risk. The only proven edge is low leverage, low cost, low frequency, strict risk control. ICT (FVG, order blocks, BOS/CHoCH, killzones) is used ONLY to mark structure and levels, never as a reason to trade by itself.
 
-## 📌 Charts pertinents (par catégorie)
+## Markets
 
-### 🥇 TIER 1 — MUST CHECK chaque jour (12 symboles, ~5 min)
+Core = forex + gold, stock indices, US large-cap stocks. Crypto = WATCH ONLY (observation, not traded until refreshed). Oil dropped.
 
-Affichés dans le Heatmap du dashboard, scan auto V5.
+## Live cockpits (TradingView layouts, built 2026-06-21)
 
-| Catégorie | Symbole TradingView | TF préféré | Killzone fav |
-|---|---|---|---|
-| **Forex Majors** | OANDA:EURUSD | 4H, 1H | London + NY |
-| | OANDA:GBPUSD | 4H, 1H | London open |
-| | OANDA:USDJPY | 4H, 1H | NY |
-| | OANDA:GBPJPY | 4H, 1H | London + NY |
-| **Indices** | OANDA:NAS100USD | 4H, 1H | NY open |
-| | OANDA:SPX500USD | 4H | NY open |
-| | OANDA:DE30EUR (DAX) | 4H | London open |
-| **Métaux** | OANDA:XAUUSD | 4H, Daily | London + NY |
-| | OANDA:XAGUSD | 4H, Daily | London + NY |
-| **Énergie** | TVC:USOIL | 4H, Daily | NY (EIA reports Wed 15:30 UTC) |
-| | TVC:UKOIL | 4H, Daily | London |
-| **Crypto** | COINBASE:BTCUSD | 4H, 1H | NY weekend opens |
-| | COINBASE:ETHUSD | 4H, 1H | NY |
+Switch between them from the TradingView layout menu:
+- **MAIN** -- cross-asset 4H: XAUUSD, NAS100, EURUSD, NVDA
+- **INDICES** -- 4H: NAS100, SPX500, US30, DAX
+- **US STOCKS** -- Daily: NVDA, AAPL, TSLA, QQQ
+- **CRYPTO WATCH** -- 4H (observation only): BTC, ETH, SOL, TOTAL
 
-### 🥈 TIER 2 — Macro Context (~10 charts, jeté d'œil rapide)
+Each chart: EMA 50 + EMA 200 (trend context) + Volume. Add ATR(14) and session VWAP on the drill-in chart for sizing and intraday mean.
 
-**Volatility / Risk gauges (status bar dashboard les surveille auto):**
-- `TVC:VIX` — SPX volatility (<15 complacent, >25 stress)
-- `CBOE:VIX9D` + `CBOE:VIX3M` — term structure (backwardation = panic)
-- `TVC:MOVE` — bond volatility (>100 = stress obligataire)
-- `CBOE:VVIX` — vol of vol
+## Tier-1 watchlist (the 12 the morning brief scans)
 
-**USD / Rates:**
-- `TVC:DXY` — USD index
-- `TVC:US10Y` ou `TVC:TNX` — 10-year yield
-- `TVC:US2Y` — 2-year yield
-- `TVC:US30Y` — 30-year long bond
-- `AMEX:TLT` — long bond ETF
+XAUUSD, EURUSD, GBPUSD, USDJPY, NAS100, SPX500, US30, DAX, NVDA, AAPL, TSLA, QQQ.
 
-**Crypto health:**
-- `COINBASE:SOLUSD`, `BITSTAMP:XRPUSD`
-- `NASDAQ:IBIT` — BlackRock BTC ETF (flow proxy)
-- BTC dominance via `CRYPTOCAP:BTC.D` (TradingView native)
+Full per-class lists (feeds standardized: OANDA for FX/metals/index CFDs, NASDAQ for US stocks, TVC for macro) live in `rules.json` under `watchlist`. Macro glance: DXY, VIX, US10Y.
 
-### 🥉 TIER 3 — Mag-7 + Sector ETFs (ouvre 1-2× par session)
+## Daily routine (UTC+7, Koh Samui)
 
-**Mag-7 (drivers NAS100):**
-- `NASDAQ:AAPL`, `NASDAQ:MSFT`, `NASDAQ:GOOGL`, `NASDAQ:AMZN`
-- `NASDAQ:NVDA` (semi king), `NASDAQ:META`, `NASDAQ:TSLA`
+You do not need to watch every session. Pick the window for what you trade today.
+1. Pre-London (12:00-14:00): glance MACRO (DXY/VIX/US10Y), mark Daily/4H bias + key levels on tier-1, check the economic calendar for high-impact news.
+2. London (14:00-18:00): FX majors + DAX liquid. First move is often a fake-out; wait.
+3. London/NY overlap (20:30-23:00) -- PRIME: highest liquidity for FX + US indices.
+4. US cash open (20:30-22:00): best window for US stocks (first 90 minutes).
+5. Outside these windows: spreads widen, slippage eats you. Default to no trade.
 
-**Sector ETFs (rotation):**
-- `AMEX:XLK` — Tech
-- `AMEX:XLE` — Energy (Hormuz proxy direct)
-- `AMEX:XLF` — Finance (yields proxy)
-- `AMEX:XLU` — Utilities (defensive)
-- `AMEX:XLP` — Staples (defensive)
-- `AMEX:XLV` — Health (defensive)
-- `AMEX:XLY` — Cons. Discretionary
-- `AMEX:XLI` — Industrials
-- `AMEX:XLB` — Materials
-- `AMEX:XLRE` — Real Estate (rates-sensitive)
-- `AMEX:XLC` — Comm. services
+Run the brief: `node ~/tradingview-mcp-jackson/src/cli/index.js brief` (or `/morning-brief`).
 
-**Thematic ETFs:**
-- `AMEX:GDX` — Gold miners (leverage gold move)
-- `AMEX:GDXJ` — Junior gold miners
-- `AMEX:GLD` — Gold ETF (spot tracker)
-- `AMEX:SLV` — Silver ETF
-- `AMEX:USO` — Oil ETF
-- `AMEX:HYG` — High-yield (junk) bonds = credit risk gauge
-- `NASDAQ:SMH` — Semiconductors (NVDA/TSM/ASML/AVGO basket)
-- `AMEX:ARKK` — Innovation (risk-on proxy)
+## Pre-trade checklist (canonical -- see PLAYBOOK.md section 4)
 
-### 🔥 TIER 4 — Thématique active (selon news cycle)
+Take a trade ONLY if all are true:
+1. Daily AND 4H bias agree.
+2. Price is AT a pre-marked level (swing, session high/low, VWAP, clean S/R or order block).
+3. 15m confirmation (structure shift / confirmation candle). Do not anticipate.
+4. ATR-based stop fits inside 1% risk (if too wide, skip -- do not tighten).
+5. Reward-to-risk >= 1:2.
+6. Session liquid for the instrument, no high-impact news within 30 min.
 
-**🛢️ Energie / Hormuz / Iran (geopolitical alpha):**
-- `NYSE:XOM`, `NYSE:CVX`, `NYSE:COP`, `NYSE:OXY` — US oil majors
-- `NYSE:SLB`, `NYSE:HAL` — oil services
-- `LSE:BP`, `LSE:SHEL` — Europe majors
-- `NYSE:ZIM`, `NYSE:DAC`, `NYSE:GLNG` — shipping (Hormuz direct play)
-- `NYSE:TNK`, `NYSE:STNG` — tanker stocks
+## Risk (non-negotiable, see rules.json)
 
-**🥇 Silver squeeze trade (COMEX inventory drain narrative):**
-- `AMEX:AGQ` — 2x leveraged silver (backwardation squeeze key chart)
-- `NYSE:WPM`, `NYSE:PAAS`, `NYSE:HL` — silver miners
-- `OANDA:XAGUSD` daily chart
+1% risk/trade from an ATR stop; max 3 open + 3 new/day; daily stop after -2% or 2 losses; leverage far below caps (FX <=5:1, gold/indices <=3:1, US stocks <=2:1); never widen a stop; never move SL to BE before +1R; journal every trade and review weekly.
 
-**🤖 AI / Data centers / Compute:**
-- `NASDAQ:NVDA`, `NASDAQ:AMD`, `NASDAQ:AVGO`, `NASDAQ:TSM` — chips
-- `NASDAQ:ASML` — lithography monopoly
-- `NASDAQ:ARM` — ARM Holdings
-- `NYSE:VST` — Vistra Energy (data center power)
-- `NYSE:CEG` — Constellation Energy (nuclear AI play)
-- `NYSE:GEV` — GE Vernova (grid/turbines)
-- `NYSE:ETR`, `NYSE:NEE` — utilities AI data center plays
+## Notes
 
-**⚛️ Uranium / Nuclear renaissance:**
-- `NYSE:CCJ` — Cameco
-- `NYSE:UEC`, `NYSE:UUUU` — US uranium
-- `NYSE:URA` — uranium ETF
-- `NYSE:NUKZ` — nuclear ETF
-- `NYSE:OKLO`, `NYSE:NNE` — SMR plays
-
-**🛡️ Defense / NATO (escalation hedge):**
-- `NYSE:LMT`, `NYSE:RTX`, `NYSE:NOC` — primes
-- `NYSE:GD`, `NYSE:HII` — naval
-- `NYSE:BA` — Boeing (mixed)
-- `LSE:BAES` (BAE Systems), `STO:SAAB` (Saab) — Europe
-
-**💎 Métaux industriels / Copper:**
-- `COMEX:HG1!` — copper futures
-- `NYSE:FCX` — Freeport (copper king)
-- `NYSE:SCCO` — Southern Copper
-- `LON:GLEN` (Glencore), `LON:RIO` — diversified miners
-
-**🇨🇳 China / Asia tensions:**
-- `NYSE:BABA`, `NYSE:JD`, `NASDAQ:PDD` — China tech
-- `AMEX:FXI` — China large-cap ETF
-- `NASDAQ:TSM` — Taiwan Semi (geopolitical wild card)
-- `OANDA:USDCNH` — offshore yuan
-
-### 🌍 TIER 5 — EM / FX exotic (advanced)
-
-**EM FX (risk-off canary):**
-- `OANDA:USDTRY` — Turkey (sanctions/Iran proxy)
-- `OANDA:USDZAR` — South Africa
-- `OANDA:USDMXN` — Mexico (US trade proxy)
-- `OANDA:USDBRL` — Brazil
-
-**Asia FX:**
-- `OANDA:USDCNH` — offshore CNY
-- `OANDA:USDKRW` — Korean Won (semis proxy)
-- `OANDA:USDSGD` — Singapore
-
-**Crosses (carry trade indicators):**
-- `OANDA:AUDJPY` — risk-on/off classic
-- `OANDA:EURJPY` — yen carry
-- `OANDA:NZDJPY` — risk barometer
-- `OANDA:CADJPY` — oil-yen
-
-### 🔮 TIER 6 — Crypto altcoins (opportuniste seulement)
-
-**Tier A (toujours surveiller):**
-- `COINBASE:BTCUSD`, `COINBASE:ETHUSD`, `COINBASE:SOLUSD`, `COINBASE:XRPUSD`
-- BTC dominance `CRYPTOCAP:BTC.D` — alts entry signal sub-56%
-
-**Tier B (si BTC dom drop):**
-- `COINBASE:LINKUSD`, `COINBASE:AVAXUSD`, `COINBASE:ADAUSD`
-- `COINBASE:DOTUSD`, `COINBASE:ATOMUSD`
-
-**ETF flow proxies:**
-- `NASDAQ:IBIT` — BlackRock BTC ETF
-- `NASDAQ:ETHA` — BlackRock ETH ETF
-
-### 📊 TIER 7 — Macro futures (rolling contracts)
-
-- `CME_MINI:NQ1!` — NQ futures (NAS100)
-- `CME_MINI:ES1!` — E-mini S&P
-- `CBOT:ZB1!` — 30Y bond
-- `CBOT:ZN1!` — 10Y note
-- `COMEX:GC1!` — Gold futures
-- `COMEX:SI1!` — Silver futures
-- `NYMEX:CL1!` — WTI crude
-- `NYMEX:NG1!` — Natural gas
-- `ICEUS:DX1!` — DXY futures
-
-## 🎯 Workflow recommandé chaque session
-
-**Routine 5 min avant London open (13:55 UTC+7):**
-1. Ouvre dashboard http://localhost:3333 → check Market Wrap + Risk Index + Agent Brief
-2. Note les COT extremes (top of dashboard COT panel)
-3. Check Catalyst Countdown bar — y a-t-il un event high impact dans les 12h?
-4. Scan Heatmap → filtre par classe d'actif
-5. Watchlist personnelle (starred) — focus
-
-**Routine pre-NY overlap (19:55 UTC+7):**
-1. Re-check Risk Index (a-t-il bougé?)
-2. Check Sentiment Trend chart 24h
-3. Sur TradingView: re-applique V5 indicator sur top 3-5 setups potentiels
-4. Vérifie confluence 6+/10 ET zone Discount (long) / Premium (short)
-5. Trade dans le killzone
-
-**Setup ICT/SMC checklist (avant entry):**
-- [ ] HTF bias confirmé (D + 4H alignés)
-- [ ] Structure: BOS ou CHoCH récent dans la bonne direction
-- [ ] Zone: en Discount (long) ou Premium (short)
-- [ ] OB ou FVG comme entry trigger
-- [ ] Liquidité sweep (Asia high/low, PDH/PDL) si possible
-- [ ] Confluence V5 >= 6/10
-- [ ] Killzone active (London ou NY overlap)
-- [ ] Conviction VERY HIGH ou HIGH dans le scanner
-- [ ] R:R minimum 1:2
-- [ ] **PAS de news high-impact dans les 30 min** (sauf si setup parfait + tu trades volontairement la vol)
-- [ ] **JAMAIS bouger SL à BE avant TP1 hit** — règle absolue
-
-## 📅 Calendar events à pricer chaque mois
-
-- **NFP** (1er vendredi) → DXY, Gold, NAS, USDJPY
-- **CPI** (~13-15 du mois) → all USD assets
-- **FOMC** (~3ème mardi/mercredi, 8/an) → everything moves
-- **ECB decision** (~6/an) → EUR/USD, DAX
-- **BoJ** (~8/an) → USDJPY (very volatile)
-- **BoE** (~8/an) → GBP/USD, GBPJPY
-- **OPEC+ meetings** (variable) → USOIL, UKOIL
-- **EIA Crude Inventories** (every Wed 15:30 UTC) → oil
-- **PMI Manufacturing** (1st business day) → DXY, SPX
-
-## 🚨 Quick reference — niveaux à toujours noter
-
-Sur chaque chart Tier 1:
-- **PDH / PDL** (Previous Day High/Low) — affiché par V5
-- **PWH / PWL** (Previous Week High/Low) — affiché par V5
-- **PMH / PML** (Previous Month High/Low) — affiché par V5
-- **NY Midnight Open** (00:00 ET = 11:00 UTC+7) — clé
-- **Asian Range** (high/low) — souvent ciblé par London Judas swing
-- **OTE Zone** (Fib 0.62-0.79 du dernier swing)
-- **Equal Highs/Lows** (liquidité)
-- **Order Block** non mitigé le plus proche
-
----
-
-**Total charts à surveiller: ~80-100 selon ton niveau de profondeur**
-**Charts essentiels (Tier 1+2): ~25** ← focus principal
-**Charts opportunistes (Tier 3-7): ~75** ← consulter selon news/thèmes actifs
+- The legacy `Pro_Trading_System_V5.pine` is NOT the basis of this process. It currently does not compile and its dashboard win-rate is a biased simulation (see `~/Documents/VsCodeN30/tradingviewcheck/tasks/lessons.md`). Do not rely on its numbers.
+- This file defers to `rules.json` and `PLAYBOOK.md` as the source of truth. If they disagree with this file, they win.

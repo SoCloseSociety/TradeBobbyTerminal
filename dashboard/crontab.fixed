@@ -1,0 +1,14 @@
+# TradeBobby crontab -- fixed 2026-07-10
+# Install with:  crontab /Users/neo/Documents/VsCodeN30/GIT_PUBLIC_SoCloseSociety/TradeBobby/dashboard/crontab.fixed
+#
+# WHY: the old crontab pointed to /Users/neo/Documents/VsCodeN30/TradeBobby (repo moved,
+# path no longer exists) so auto-scan + econ-calendar silently died for 14 days, and the
+# news-scanner line had no `cd` so it failed every 15 min and filled ~/news-scanner.log
+# with 14 000+ MODULE_NOT_FOUND errors.
+#
+# auto-scan, econ-calendar and news-scanner now run as --daemon processes managed by
+# manage.sh, so cron only needs the watchdog (self-healing every 5 min).
+
+PATH=/Users/neo/.nvm/versions/node/v22.22.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+*/5 * * * * cd /Users/neo/Documents/VsCodeN30/GIT_PUBLIC_SoCloseSociety/TradeBobby/dashboard && /bin/bash watchdog.sh >> watchdog.log 2>&1

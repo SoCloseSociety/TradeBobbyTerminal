@@ -3,6 +3,18 @@
 
 //@version=5
 indicator("Pro Trading V6 - ICT/SMC + MACRO", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+// =====================================================================
+// AUDIT CAVEAT (2026-06-22): this legacy ICT/SMC indicator now COMPILES cleanly
+// (0 errors, 0 warnings) after the audit fixes: duplicate-definition renames
+// (showKZ->showKZBg, mtfAligned->mtfAligned4, mtfCol->mtfColV6), a forward-
+// reference reorder (the MTF + P3/News dashboard rows moved to EOF so their
+// inputs are declared first), and hlc3->hlc3v to stop shadowing a built-in. The dashboard W/L "Record" is a hand-rolled
+// simulation with NO commission/slippage and counts a stopped-out trade as a
+// WIN if TP1 was tagged -- its win rate is NOT evidence-grade. Per
+// RESEARCH_FINDINGS.md the ICT confluence score is unproven; the defensible
+// value here is the risk layer (ATR stops, R:R gating, fixed-fractional
+// sizing). Source of truth for trading = rules.json + PLAYBOOK.md.
+// =====================================================================
 
 // ══════════════════════════════════════════════════════════════════════════════
 // INPUTS
@@ -136,7 +148,7 @@ colVwapBand    = input.color(color.new(#FF9800, 70), "VWAP Bands Color", group=g
 
 // ──── V6 — KILLZONE BACKGROUND ────
 grpKZ          = "V6 · KILLZONE VISUAL"
-showKZ         = input.bool(true, "Highlight Killzones Background", group=grpKZ)
+showKZBg       = input.bool(true, "Highlight Killzones Background", group=grpKZ)
 showAsianKZ    = input.bool(false, "Asian (03-07 UTC+7)", group=grpKZ)
 showLondonKZ   = input.bool(true, "London KZ (14-18 UTC+7)", group=grpKZ)
 showNYOpenKZ   = input.bool(true, "NY Open (19-22 UTC+7) — PRIME", group=grpKZ)
@@ -1154,8 +1166,8 @@ roundInterval = close > 1000 ? 50 : close > 100 ? 10 : close > 10 ? 5 : close > 
 nearestRoundUp = math.ceil(close / roundInterval) * roundInterval
 nearestRoundDn = math.floor(close / roundInterval) * roundInterval
 
-plot(showRoundNums ? nearestRoundUp : na, "Round ↑", color=color.new(#9E9E9E, 70), linewidth=1, style=plot.style_cross)
-plot(showRoundNums ? nearestRoundDn : na, "Round ↓", color=color.new(#9E9E9E, 70), linewidth=1, style=plot.style_cross)
+// [plot-limit] plot(showRoundNums ? nearestRoundUp : na, "Round ↑", color=color.new(#9E9E9E, 70), linewidth=1, style=plot.style_cross)
+// [plot-limit] plot(showRoundNums ? nearestRoundDn : na, "Round ↓", color=color.new(#9E9E9E, 70), linewidth=1, style=plot.style_cross)
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1398,22 +1410,8 @@ if showDashboard and barstate.islast
     regCol = riskOnLocal ? #00E676 : #FF5252
     table.cell(dash, 1, 19, regTxt, text_color=regCol, text_size=size.small)
 
-    // V6 — MTF Bias row
-    if useMTFBias and showMTFRow
-        table.cell(dash, 0, 20, "MTF D/4H/1H", text_color=#9E9E9E, text_size=size.small)
-        mtfDChar  = mtfD == 1 ? "▲" : mtfD == -1 ? "▼" : "·"
-        mtfH4Char = mtfH4 == 1 ? "▲" : mtfH4 == -1 ? "▼" : "·"
-        mtfH1Char = mtfH1 == 1 ? "▲" : mtfH1 == -1 ? "▼" : "·"
-        mtfTxt = mtfDChar + " " + mtfH4Char + " " + mtfH1Char + " · " + str.tostring(math.abs(mtfSum)) + "/4"
-        mtfCol = mtfStronglyAligned ? (mtfSum > 0 ? #00E676 : #FF5252) : #FFEB3B
-        table.cell(dash, 1, 20, mtfTxt, text_color=mtfCol, text_size=size.small)
-
-    // V6 — P3 + News Blackout status row
-    if showP3 or useNewsBlack
-        table.cell(dash, 0, 21, "P3 / News", text_color=#9E9E9E, text_size=size.small)
-        p3Disp  = showP3 ? p3Phase : ""
-        newsDisp = useNewsBlack and newsBlackout ? " · 🚫 BLACKOUT" : useNewsBlack ? " · OK" : ""
-        table.cell(dash, 1, 21, p3Disp + newsDisp, text_color=p3Col, text_size=size.small)
+    // V6 dashboard MTF + P3/News rows moved to the END of this file to fix forward-references
+    // (mtf*/p3*/newsBlackout are declared further down). See relocated block at EOF.
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1439,7 +1437,7 @@ vixLongBlock = useVixFilter and blockTradesHighVix and vixHigh
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Daily VWAP — anchored at session start of the day (NY 00:00 = our Asia/Bangkok day start approx)
-hlc3 = (high + low + close) / 3.0
+hlc3v = (high + low + close) / 3.0
 var float vwapDayNum = 0.0
 var float vwapDayDen = 0.0
 var float vwapDayDevSum = 0.0
@@ -1448,11 +1446,11 @@ if isNewDay
     vwapDayNum := 0.0
     vwapDayDen := 0.0
     vwapDayDevSum := 0.0
-vwapDayNum := vwapDayNum + hlc3 * volume
+vwapDayNum := vwapDayNum + hlc3v * volume
 vwapDayDen := vwapDayDen + volume
 vwapDay = vwapDayDen > 0 ? vwapDayNum / vwapDayDen : na
 if not na(vwapDay)
-    vwapDayDevSum := vwapDayDevSum + math.pow(hlc3 - vwapDay, 2) * volume
+    vwapDayDevSum := vwapDayDevSum + math.pow(hlc3v - vwapDay, 2) * volume
 vwapDayStd = vwapDayDen > 0 ? math.sqrt(vwapDayDevSum / vwapDayDen) : na
 
 // Weekly VWAP
@@ -1462,7 +1460,7 @@ isNewWeek = ta.change(time("W")) != 0
 if isNewWeek
     vwapWeekNum := 0.0
     vwapWeekDen := 0.0
-vwapWeekNum := vwapWeekNum + hlc3 * volume
+vwapWeekNum := vwapWeekNum + hlc3v * volume
 vwapWeekDen := vwapWeekDen + volume
 vwapWeek = vwapWeekDen > 0 ? vwapWeekNum / vwapWeekDen : na
 
@@ -1486,9 +1484,9 @@ inAsianKZ  = not na(time(timeframe.period, "0300-0700", "Asia/Bangkok"))
 inLondonKZ = not na(time(timeframe.period, "1400-1800", "Asia/Bangkok"))
 inNYKZ     = not na(time(timeframe.period, "1900-2200", "Asia/Bangkok"))
 
-bgcolor(showKZ and showAsianKZ and inAsianKZ ? colAsianKZ : na, title="Asia KZ")
-bgcolor(showKZ and showLondonKZ and inLondonKZ ? colLondonKZ : na, title="London KZ")
-bgcolor(showKZ and showNYOpenKZ and inNYKZ ? colNYKZ : na, title="NY KZ PRIME")
+bgcolor(showKZBg and showAsianKZ and inAsianKZ ? colAsianKZ : na, title="Asia KZ")
+bgcolor(showKZBg and showLondonKZ and inLondonKZ ? colLondonKZ : na, title="London KZ")
+bgcolor(showKZBg and showNYOpenKZ and inNYKZ ? colNYKZ : na, title="NY KZ PRIME")
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1561,7 +1559,7 @@ mtfH1 = useMTFBias ? mtfBiasFor("60")  : 0
 mtfCur = trend  // current TF trend from structure engine
 
 mtfSum = mtfD + mtfH4 + mtfH1 + (mtfCur != 0 ? mtfCur : 0)
-mtfAligned = math.abs(mtfSum) == 4  // all four agree
+mtfAligned4 = math.abs(mtfSum) == 4  // all four agree
 mtfStronglyAligned = math.abs(mtfSum) >= 3
 
 
@@ -1883,49 +1881,76 @@ bgcolor(showStackZones and stackedFlag ? colStackZone : na, title="Stacked Confl
 // ALERTS
 // ══════════════════════════════════════════════════════════════════════════════
 
+// [plot-limit fix 2026-07-10] TradingView counts alertcondition() in the 64-plot cap.
+// 95 plots -> runtime error RE10140 on EVERY symbol (indicator dead since 2026-06-26,
+// dashboard scanned 0/12 study data). Kept the 8 core alerts; the dashboard's own
+// setup-alerter covers the rest. Round-number plots also dropped for margin (61/64).
 alertcondition(bosUp, "Bullish BOS", "Bullish Break of Structure detected")
 alertcondition(bosDn, "Bearish BOS", "Bearish Break of Structure detected")
 alertcondition(chochUp, "Bullish CHoCH", "Bullish Change of Character detected")
 alertcondition(chochDn, "Bearish CHoCH", "Bearish Change of Character detected")
-alertcondition(liqSweepUp, "Liquidity Sweep High", "Liquidity swept above equal highs")
-alertcondition(liqSweepDn, "Liquidity Sweep Low", "Liquidity swept below equal lows")
-alertcondition(sqzOn and not sqzOn[1], "Squeeze Started", "Bollinger Squeeze detected")
-alertcondition(inducementUp, "Bullish Inducement", "Bullish inducement detected — fake breakdown reversed")
-alertcondition(inducementDn, "Bearish Inducement", "Bearish inducement detected — fake breakout reversed")
+// [plot-limit] alertcondition(liqSweepUp, "Liquidity Sweep High", "Liquidity swept above equal highs")
+// [plot-limit] alertcondition(liqSweepDn, "Liquidity Sweep Low", "Liquidity swept below equal lows")
+// [plot-limit] alertcondition(sqzOn and not sqzOn[1], "Squeeze Started", "Bollinger Squeeze detected")
+// [plot-limit] alertcondition(inducementUp, "Bullish Inducement", "Bullish inducement detected — fake breakdown reversed")
+// [plot-limit] alertcondition(inducementDn, "Bearish Inducement", "Bearish inducement detected — fake breakout reversed")
 alertcondition(bullConf >= 6, "High Bull Confluence", "Bullish confluence >= 6/10 — strong setup forming")
 alertcondition(bearConf >= 6, "High Bear Confluence", "Bearish confluence >= 6/10 — strong setup forming")
 alertcondition(lastSignal == "LONG" and lastSignal[1] != "LONG", "LONG Signal", "LONG entry signal with confluence")
 alertcondition(lastSignal == "SHORT" and lastSignal[1] != "SHORT", "SHORT Signal", "SHORT entry signal with confluence")
-alertcondition(stackOk and not stackOk[1], "Stack OK", "Safe to stack positions — volume + direction + no range")
-alertcondition(not stackOk and stackOk[1], "Stack OFF", "Stop stacking — conditions degraded")
+// [plot-limit] alertcondition(stackOk and not stackOk[1], "Stack OK", "Safe to stack positions — volume + direction + no range")
+// [plot-limit] alertcondition(not stackOk and stackOk[1], "Stack OFF", "Stop stacking — conditions degraded")
 
 // V6 alerts
-alertcondition(useVixFilter and vixHigh and not vixHigh[1], "VIX Stress ON", "VIX crossed above threshold — risk-off regime")
-alertcondition(useVixFilter and not vixHigh and vixHigh[1], "VIX Stress OFF", "VIX dropped below threshold — calm returning")
-alertcondition(useVixFilter and vixCalm and not vixCalm[1], "VIX Complacent", "VIX < 15 — late-cycle complacency, contrarian top warning")
-alertcondition(inLondonKZ and not inLondonKZ[1], "London KZ Open", "London killzone opening (14:00 UTC+7)")
-alertcondition(inNYKZ and not inNYKZ[1], "NY KZ Open", "NY killzone opening — PRIME (19:00 UTC+7)")
-alertcondition(showVwapDaily and ta.crossover(close, vwapDay), "Cross above Daily VWAP", "Price crossed ABOVE the daily VWAP — bullish bias")
-alertcondition(showVwapDaily and ta.crossunder(close, vwapDay), "Cross below Daily VWAP", "Price crossed BELOW the daily VWAP — bearish bias")
-alertcondition(showVwapWeekly and ta.crossover(close, vwapWeek), "Cross above Weekly VWAP", "Price reclaimed Weekly VWAP — higher-TF bullish")
-alertcondition(showVwapWeekly and ta.crossunder(close, vwapWeek), "Cross below Weekly VWAP", "Price lost Weekly VWAP — higher-TF bearish")
+// [plot-limit] alertcondition(useVixFilter and vixHigh and not vixHigh[1], "VIX Stress ON", "VIX crossed above threshold — risk-off regime")
+// [plot-limit] alertcondition(useVixFilter and not vixHigh and vixHigh[1], "VIX Stress OFF", "VIX dropped below threshold — calm returning")
+// [plot-limit] alertcondition(useVixFilter and vixCalm and not vixCalm[1], "VIX Complacent", "VIX < 15 — late-cycle complacency, contrarian top warning")
+// [plot-limit] alertcondition(inLondonKZ and not inLondonKZ[1], "London KZ Open", "London killzone opening (14:00 UTC+7)")
+// [plot-limit] alertcondition(inNYKZ and not inNYKZ[1], "NY KZ Open", "NY killzone opening — PRIME (19:00 UTC+7)")
+// [plot-limit] alertcondition(showVwapDaily and ta.crossover(close, vwapDay), "Cross above Daily VWAP", "Price crossed ABOVE the daily VWAP — bullish bias")
+// [plot-limit] alertcondition(showVwapDaily and ta.crossunder(close, vwapDay), "Cross below Daily VWAP", "Price crossed BELOW the daily VWAP — bearish bias")
+// [plot-limit] alertcondition(showVwapWeekly and ta.crossover(close, vwapWeek), "Cross above Weekly VWAP", "Price reclaimed Weekly VWAP — higher-TF bullish")
+// [plot-limit] alertcondition(showVwapWeekly and ta.crossunder(close, vwapWeek), "Cross below Weekly VWAP", "Price lost Weekly VWAP — higher-TF bearish")
 
 // V6 — MTF / IFVG / OTE / News / Power-of-3 alerts
-alertcondition(useMTFBias and mtfAligned and mtfSum > 0 and mtfSum[1] < 4, "MTF Aligned BULL", "Daily + 4H + 1H + Current all bullish — strongest possible alignment")
-alertcondition(useMTFBias and mtfAligned and mtfSum < 0 and mtfSum[1] > -4, "MTF Aligned BEAR", "Daily + 4H + 1H + Current all bearish — strongest possible alignment")
-alertcondition(useMTFBias and mtfStronglyAligned and not mtfStronglyAligned[1], "MTF Strong Alignment", "3 of 4 timeframes aligned — strong directional bias")
-alertcondition(showIFVG and array.size(ifvgBoxes) > array.size(ifvgBoxes)[1], "New IFVG Detected", "An FVG inverted — new opposite-direction resistance/support formed")
-alertcondition(useNewsBlack and newsBlackout and not newsBlackout[1], "News Blackout ENTER", "Entering news blackout window — avoid new entries")
-alertcondition(useNewsBlack and not newsBlackout and newsBlackout[1], "News Blackout EXIT", "News blackout window cleared — trading allowed again")
-alertcondition(showP3 and inLondonKZ and not inLondonKZ[1], "P3 MANIPULATION starts", "London phase = MANIPULATION (Judas swing risk)")
-alertcondition(showP3 and inNYKZ and not inNYKZ[1], "P3 DISTRIBUTION starts", "NY phase = DISTRIBUTION (true daily trend establishes)")
+// [plot-limit] alertcondition(useMTFBias and mtfAligned4 and mtfSum > 0 and mtfSum[1] < 4, "MTF Aligned BULL", "Daily + 4H + 1H + Current all bullish — strongest possible alignment")
+// [plot-limit] alertcondition(useMTFBias and mtfAligned4 and mtfSum < 0 and mtfSum[1] > -4, "MTF Aligned BEAR", "Daily + 4H + 1H + Current all bearish — strongest possible alignment")
+// [plot-limit] alertcondition(useMTFBias and mtfStronglyAligned and not mtfStronglyAligned[1], "MTF Strong Alignment", "3 of 4 timeframes aligned — strong directional bias")
+// [plot-limit] alertcondition(showIFVG and array.size(ifvgBoxes) > array.size(ifvgBoxes)[1], "New IFVG Detected", "An FVG inverted — new opposite-direction resistance/support formed")
+// [plot-limit] alertcondition(useNewsBlack and newsBlackout and not newsBlackout[1], "News Blackout ENTER", "Entering news blackout window — avoid new entries")
+// [plot-limit] alertcondition(useNewsBlack and not newsBlackout and newsBlackout[1], "News Blackout EXIT", "News blackout window cleared — trading allowed again")
+// [plot-limit] alertcondition(showP3 and inLondonKZ and not inLondonKZ[1], "P3 MANIPULATION starts", "London phase = MANIPULATION (Judas swing risk)")
+// [plot-limit] alertcondition(showP3 and inNYKZ and not inNYKZ[1], "P3 DISTRIBUTION starts", "NY phase = DISTRIBUTION (true daily trend establishes)")
 
 // V6 — HTF FVG / Voids / Mitigation / Stacked alerts
-alertcondition(showHTF4H_FVG and array.size(htf4hBullBoxes) > array.size(htf4hBullBoxes)[1], "New 4H Bull FVG", "A new bullish FVG formed on the 4H timeframe")
-alertcondition(showHTF4H_FVG and array.size(htf4hBearBoxes) > array.size(htf4hBearBoxes)[1], "New 4H Bear FVG", "A new bearish FVG formed on the 4H timeframe")
-alertcondition(showHTFD_FVG and array.size(htfDBullBoxes) > array.size(htfDBullBoxes)[1], "New Daily Bull FVG", "A new bullish FVG formed on the Daily timeframe — high impact")
-alertcondition(showHTFD_FVG and array.size(htfDBearBoxes) > array.size(htfDBearBoxes)[1], "New Daily Bear FVG", "A new bearish FVG formed on the Daily timeframe — high impact")
-alertcondition(showVoid and array.size(voidBoxes) > array.size(voidBoxes)[1], "Liquidity Void", "Extreme imbalance candle detected — price moves fast, expect retrace")
-alertcondition(showMit and array.size(bullMitBoxes) > array.size(bullMitBoxes)[1], "Bullish Mitigation Block", "Clean bullish impulse — mitigation block formed at origin")
-alertcondition(showMit and array.size(bearMitBoxes) > array.size(bearMitBoxes)[1], "Bearish Mitigation Block", "Clean bearish impulse — mitigation block formed at origin")
-alertcondition(showStackZones and stackedFlag and not stackedFlag[1], "Stacked Confluence Zone", "Multiple structures overlap at current price — high-probability reaction zone")
+// [plot-limit] alertcondition(showHTF4H_FVG and array.size(htf4hBullBoxes) > array.size(htf4hBullBoxes)[1], "New 4H Bull FVG", "A new bullish FVG formed on the 4H timeframe")
+// [plot-limit] alertcondition(showHTF4H_FVG and array.size(htf4hBearBoxes) > array.size(htf4hBearBoxes)[1], "New 4H Bear FVG", "A new bearish FVG formed on the 4H timeframe")
+// [plot-limit] alertcondition(showHTFD_FVG and array.size(htfDBullBoxes) > array.size(htfDBullBoxes)[1], "New Daily Bull FVG", "A new bullish FVG formed on the Daily timeframe — high impact")
+// [plot-limit] alertcondition(showHTFD_FVG and array.size(htfDBearBoxes) > array.size(htfDBearBoxes)[1], "New Daily Bear FVG", "A new bearish FVG formed on the Daily timeframe — high impact")
+// [plot-limit] alertcondition(showVoid and array.size(voidBoxes) > array.size(voidBoxes)[1], "Liquidity Void", "Extreme imbalance candle detected — price moves fast, expect retrace")
+// [plot-limit] alertcondition(showMit and array.size(bullMitBoxes) > array.size(bullMitBoxes)[1], "Bullish Mitigation Block", "Clean bullish impulse — mitigation block formed at origin")
+// [plot-limit] alertcondition(showMit and array.size(bearMitBoxes) > array.size(bearMitBoxes)[1], "Bearish Mitigation Block", "Clean bearish impulse — mitigation block formed at origin")
+// [plot-limit] alertcondition(showStackZones and stackedFlag and not stackedFlag[1], "Stacked Confluence Zone", "Multiple structures overlap at current price — high-probability reaction zone")
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// V6 dashboard rows (MTF + P3/News) relocated here so their inputs are already declared
+// (fixes 'Undeclared identifier' forward-reference errors). dash table is a global var.
+// ────────────────────────────────────────────────────────────────────────────
+if showDashboard and barstate.islast
+    // V6 — MTF Bias row
+    if useMTFBias and showMTFRow
+        table.cell(dash, 0, 20, "MTF D/4H/1H", text_color=#9E9E9E, text_size=size.small)
+        mtfDChar  = mtfD == 1 ? "▲" : mtfD == -1 ? "▼" : "·"
+        mtfH4Char = mtfH4 == 1 ? "▲" : mtfH4 == -1 ? "▼" : "·"
+        mtfH1Char = mtfH1 == 1 ? "▲" : mtfH1 == -1 ? "▼" : "·"
+        mtfTxt = mtfDChar + " " + mtfH4Char + " " + mtfH1Char + " · " + str.tostring(math.abs(mtfSum)) + "/4"
+        mtfColV6 = mtfStronglyAligned ? (mtfSum > 0 ? #00E676 : #FF5252) : #FFEB3B
+        table.cell(dash, 1, 20, mtfTxt, text_color=mtfColV6, text_size=size.small)
+
+    // V6 — P3 + News Blackout status row
+    if showP3 or useNewsBlack
+        table.cell(dash, 0, 21, "P3 / News", text_color=#9E9E9E, text_size=size.small)
+        p3Disp  = showP3 ? p3Phase : ""
+        newsDisp = useNewsBlack and newsBlackout ? " · 🚫 BLACKOUT" : useNewsBlack ? " · OK" : ""
+        table.cell(dash, 1, 21, p3Disp + newsDisp, text_color=p3Col, text_size=size.small)
