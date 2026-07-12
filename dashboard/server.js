@@ -352,7 +352,15 @@ const HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TRADEBOBBY TERMINAL</title>
+<title>TradeBobby Terminal — Macro &amp; ICT/SMC Trading Dashboard</title>
+<meta name="description" content="TradeBobby: local real-time trading terminal. ICT/SMC scanner for forex, gold, indices &amp; stocks, macro regime (VIX, yields, DXY, sectors), geopolitical news, COT, ETF flows, and a live crypto orderflow view — funding, open interest, liquidations, order book.">
+<meta name="keywords" content="trading dashboard, orderflow, ICT, SMC, funding rate, open interest, liquidations, CVD, order book heatmap, forex, gold, macro, VIX, DXY, crypto, Binance, Hyperliquid">
+<meta name="theme-color" content="#0a0c0f">
+<link rel="icon" href="/favicon.svg">
+<meta property="og:type" content="website">
+<meta property="og:title" content="TradeBobby Terminal — Macro &amp; ICT/SMC Trading Dashboard">
+<meta property="og:description" content="Local real-time trading terminal: ICT/SMC macro scanner + live crypto orderflow (funding, OI, liquidations, order book).">
+<meta name="twitter:card" content="summary_large_image">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
@@ -1672,10 +1680,10 @@ function renderHeatmap(scan) {
     // Intraday delta from scan_history (window.__SCAN_HIST)
     let deltaTxt = '';
     const hist = window.__SCAN_HIST?.[s.symbol];
-    if (hist && hist.length >= 2 && s.price) {
+    if (hist && hist.length >= 2 && s.price && hist[hist.length - 2] > 0) {
       const prev = hist[hist.length - 2];
       const delta = ((s.price - prev) / prev) * 100;
-      if (Math.abs(delta) > 0.001) {
+      if (isFinite(delta) && Math.abs(delta) > 0.001 && Math.abs(delta) < 1000) {
         const dCol = delta > 0 ? '#00E676' : '#FF5252';
         deltaTxt = '<span style="position:absolute;bottom:2px;right:4px;color:'+dCol+';font-size:8px;">'+(delta>0?'+':'')+delta.toFixed(2)+'%</span>';
       }
@@ -3499,7 +3507,12 @@ setInterval(refresh, 30000);
 // ── Focused ORDERFLOW LIVE page (static; data via /api/orderflow + /api/orderflow-depth) ──
 const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Orderflow Live</title>
+<title>TradeBobby — Live Crypto Orderflow (funding, OI, liquidations)</title>
+<meta name="description" content="Real-time crypto orderflow terminal: candlestick + CVD, funding rate &amp; open interest, long/short ratio, liquidation feed, order-book heatmap and trades tape for BTC, ETH, SOL and more. Binance Futures + Hyperliquid data.">
+<meta name="theme-color" content="#0a0c0f">
+<link rel="icon" href="/favicon.svg">
+<meta property="og:title" content="TradeBobby — Live Crypto Orderflow">
+<meta property="og:description" content="Funding, open interest, liquidations, CVD and order-book heatmap in one real-time terminal.">
 <style>
   :root{--bg:#0a0c0f;--panel:#10141a;--border:#1e2630;--muted:#6b7785;--g:#28dc78;--r:#ff4646;--y:#ffc14d;--cy:#3fd0ff;--tx:#cfd8e3}
   *{box-sizing:border-box}
@@ -4173,7 +4186,9 @@ app.get('/live', (req, res) => { res.set('Cache-Control', 'no-store, no-cache, m
 
 // ── Full in-app help / tutorial page ──
 const HELP_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeBobby — Guide</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeBobby — Guide &amp; Documentation</title>
+<meta name="description" content="Complete guide to the TradeBobby trading dashboard: desktop app, every tab, the live orderflow panels, all daemons &amp; data sources, keyboard shortcuts, trading rules, how to read the signals, and troubleshooting.">
+<meta name="theme-color" content="#0a0c0f">
 <link rel="icon" href="/favicon.svg">
 <style>
   :root{--bg:#0a0c0f;--panel:#10141a;--border:#1e2630;--muted:#8593a3;--g:#28dc78;--r:#ff4646;--y:#ffc14d;--cy:#3fd0ff;--tx:#d7dee7}

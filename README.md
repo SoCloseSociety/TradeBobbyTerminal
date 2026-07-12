@@ -17,6 +17,23 @@ Open-source, self-hosted, runs on your laptop. Synthesizes 15+ free data sources
 
 ---
 
+## 📸 Screenshots
+
+### Live crypto orderflow — funding · OI · liquidations · CVD · order book
+
+![TradeBobby live orderflow terminal](docs/screenshots/orderflow-live.png)
+
+A real-time microstructure terminal: candlestick + CVD, a derivatives ribbon (funding rate, open interest, retail vs smart-money long/short, taker flow, cross-venue funding gap), an SVG long/short squeeze gauge, a liquidation feed, an order-book heatmap, and a trades tape — all from **Binance spot + futures and Hyperliquid**, no API key.
+
+### Macro terminal &amp; ICT/SMC scanner &nbsp;·&nbsp; Built-in guide
+
+<table><tr>
+<td width="50%"><img src="docs/screenshots/terminal.png" alt="TradeBobby macro terminal"></td>
+<td width="50%"><img src="docs/screenshots/help-guide.png" alt="TradeBobby in-app guide"></td>
+</tr></table>
+
+---
+
 ## What it is
 
 TradeBobby is a **research desk in a box** for systematic discretionary traders who follow ICT/SMC methodology and trade macro narratives. It runs locally, pulls free data from 15+ public sources every 5-30 minutes, and renders a single dense terminal that tells you:
@@ -64,7 +81,27 @@ It does **not** execute trades, send orders, or manage your capital. It's a deci
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**41 panels** · **31 API endpoints** · **6 sticky bars** · Bloomberg-style density.
+**41 panels** · **34 API endpoints** · **6 sticky bars** · Bloomberg-style density.
+
+### 🌊 Live crypto orderflow (`localhost:3333/live`)
+
+A dedicated Coinglass-style microstructure terminal for BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX:
+
+- **Derivatives ribbon** — funding rate (/8h + annualized, live countdown to next funding), open interest + 24h change, **long/short ratio for retail accounts vs top smart-money positions**, taker buy%, and the **Binance↔Hyperliquid funding gap** (cross-venue positioning divergence).
+- **Candlestick + CVD** (true taker buy/sell delta) + volume, with $25k+ whale prints.
+- **Long/short squeeze gauge** (SVG) with automatic squeeze-risk detection.
+- **Liquidation feed** + rolling long-vs-short liquidation $ bar (Binance forced-liquidation stream).
+- **Order-book heatmap** (live resting liquidity) + **trades tape** (buy/sell aggressor).
+- **OBI sparkline** and a **funding heat radar** across all 8 symbols.
+- Per-feed connection dots, keyboard nav (`1`–`8` symbols, `[` / `]` timeframe), all data via WebSocket + smart polling. **No API key required.**
+
+### 🖥️ One-click desktop app (macOS / Windows)
+
+An Electron wrapper (`desktop/`) launches the dashboard **and all ~20 daemons** in one click, shows the terminal in a window, and puts a menu-bar tray with Start / Stop / Restart / status. Build with `cd desktop && npm install && npm run dist:mac`.
+
+### 📖 Built-in guide (`localhost:3333/help`)
+
+A full in-app tutorial: desktop app, every tab, every orderflow panel explained, all daemons &amp; data sources, keyboard shortcuts, trading rules, how to read the signals, and troubleshooting.
 
 ### ⌨ Bloomberg-style command palette (⌘K / Ctrl+K)
 
@@ -118,6 +155,9 @@ See [PINE_V6_CHANGELOG.md](PINE_V6_CHANGELOG.md) for module-by-module breakdown.
 | alternative.me | Crypto Fear & Greed Index | 5 min |
 | CoinGecko | BTC/ETH dominance, global mcap | 5 min |
 | Binance perpetuals | Funding rates (12 tracked + extremes) | 5 min |
+| **Binance Futures (fapi)** | **Funding, open interest, long/short ratios, taker flow, liquidation stream** | **60 s / realtime** |
+| **Hyperliquid** | **Cross-venue funding &amp; OI (BTC/ETH/SOL)** | **60 s** |
+| Binance spot + WS | Orderflow: klines, depth, aggTrades, CVD (the /live page) | realtime |
 | blockchain.info | BTC hashrate, supply, difficulty | 10 min |
 | mempool.space | BTC fees, congestion | 10 min |
 | Google News RSS | News (60+ feeds, 8 categories, sentiment scoring) | manual/cron |
