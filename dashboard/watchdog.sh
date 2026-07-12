@@ -23,6 +23,7 @@ DAEMONS=(
   "macro-pulse.js --daemon"
   "macro-context.js --daemon"
   "crypto-pulse.js --daemon"
+  "derivatives.js --daemon"
   "orderflow-crypto.js --daemon"
   "news-scanner.js --daemon"
   "cot-fetcher.js --daemon"
@@ -40,6 +41,29 @@ DAEMONS=(
   "auto-scan.js --daemon"
   "econ-calendar.js --daemon"
 )
+
+# Output-freshness map: "<output.json>:<max_age_seconds>" per daemon script name.
+# Only the fast/periodic daemons are listed. Slow/long-interval ones (cot-fetcher daily,
+# econ-calendar daily, auto-scan 4h, weekly-brief weekly, setup-alerter/tracker event-driven,
+# claude/tts narrators) are intentionally omitted -- for them, being "stale" is normal, so
+# they stay on liveness-only checking and are never restarted for lack of fresh output.
+# Thresholds are ~3-4x the daemon's own interval to avoid thrashing on a slow cycle.
+fresh_spec() {
+  case "$1" in
+    macro-pulse.js)       echo "macro_pulse.json:1800" ;;      # writes every 5m
+    crypto-pulse.js)      echo "crypto_pulse.json:1800" ;;
+    derivatives.js)       echo "derivatives.json:600" ;;      # writes every 60s
+    orderflow-crypto.js)  echo "orderflow_crypto.json:1800" ;;
+    currency-strength.js) echo "currency_strength.json:1800" ;;
+    onchain-btc.js)       echo "onchain_btc.json:3600" ;;
+    macro-context.js)     echo "macro_context.json:5400" ;;    # every 30m
+    news-scanner.js)      echo "news_feed.json:3600" ;;
+    reddit-mania.js)      echo "reddit_mania.json:3600" ;;
+    etf-flows.js)         echo "etf_flows.json:7200" ;;
+    earnings-cal.js)      echo "earnings_cal.json:43200" ;;    # every ~6-12h
+    *)                    echo "" ;;
+  esac
+}
 
 check_and_restart() {
   local now
@@ -59,13 +83,31 @@ check_and_restart() {
   # Check each daemon by full command match
   for d in "${DAEMONS[@]}"; do
     local script="${d%% *}"
+    local log="${script%.js}.log"
     # pgrep -f self-excludes; the old ps|grep matched its own grep line so a dead daemon was NEVER detected
     if ! pgrep -f "node $d" >/dev/null 2>&1; then
       echo "[$now] ❌ $script DEAD — restarting"
-      local log="${script%.js}.log"
       nohup node $d >> "$log" 2>&1 &
       disown
       started=$((started + 1))
+      continue
+    fi
+    # Alive but check OUTPUT FRESHNESS. A daemon can be a live PID yet stop writing
+    # (hung socket after machine sleep -- on 2026-07-11 every output froze for 22h while
+    # the processes stayed "green"). Liveness alone missed it; freshness catches it.
+    local spec; spec="$(fresh_spec "$script")"
+    if [ -n "$spec" ]; then
+      local file="${spec%%:*}"; local maxage="${spec##*:}"
+      if [ -f "$file" ]; then
+        local age=$(( $(date +%s) - $(stat -f %m "$file" 2>/dev/null || echo 0) ))
+        if [ "$age" -gt "$maxage" ]; then
+          echo "[$now] ⏳ $script HUNG (output ${age}s > ${maxage}s stale) — restarting"
+          pkill -f "node $d" 2>/dev/null; sleep 1
+          nohup node $d >> "$log" 2>&1 &
+          disown
+          started=$((started + 1))
+        fi
+      fi
     fi
   done
 

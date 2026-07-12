@@ -13,6 +13,7 @@ dashboard/pending_alerts.json
 # Comment these out if you want to commit historical snapshots
 dashboard/macro_pulse.json
 dashboard/crypto_pulse.json
+dashboard/derivatives.json
 dashboard/cot.json
 dashboard/news_feed.json
 dashboard/onchain_btc.json

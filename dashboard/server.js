@@ -6,6 +6,17 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3333', 10);
+
+// Safety net: a single stray async rejection (e.g. a Binance fetch aborting) used to crash the
+// whole dashboard. Log and keep serving instead of dying -- the endpoints already return their
+// own error JSON, so a background rejection should never take the process down.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && reason.message ? reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.message ? err.message : err);
+});
+
 const app = express();
 app.use(express.json({ limit: '32kb' }));
 
@@ -116,6 +127,16 @@ app.post('/api/dismiss-alerts', (req, res) => {
 app.get('/api/trade-brief', (req, res) => {
   res.json(readJSON(join(__dirname, 'trade_brief.json')) || { note: 'Run: node trade-agent.js' });
 });
+
+// Crypto futures microstructure (funding, OI, long/short, taker) -- from derivatives.js daemon.
+app.get('/api/derivatives', (req, res) => {
+  res.json(readJSON(join(__dirname, 'derivatives.json')) || { symbols: {}, note: 'Run: node derivatives.js' });
+});
+
+// Inline SVG favicon (was a 404). Candlestick glyph on the dark theme bg.
+const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0e1218"/><rect x="9" y="8" width="3" height="16" fill="#28dc78"/><rect x="10" y="5" width="1" height="22" fill="#28dc78"/><rect x="20" y="12" width="3" height="11" fill="#ff4646"/><rect x="21" y="9" width="1" height="20" fill="#ff4646"/></svg>`;
+app.get('/favicon.ico', (req, res) => { res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=86400').send(FAVICON); });
+app.get('/favicon.svg', (req, res) => { res.set('Content-Type', 'image/svg+xml').send(FAVICON); });
 
 app.get('/api/sentiment-history', (req, res) => {
   res.json(readJSON(join(__dirname, 'sentiment_history.json')) || { snapshots: [] });
@@ -566,6 +587,7 @@ const HTML = `<!DOCTYPE html>
   </div>
   <div class="status-actions">
     <a class="btn btn-ghost" href="/live" style="text-decoration:none;" title="Vue orderflow epuree (chart + heatmap + tape)">🌊 LIVE</a>
+    <a class="btn btn-ghost" href="/help" style="text-decoration:none;" title="Guide complet &amp; aide d'utilisation">? GUIDE</a>
     <button class="btn btn-ghost" onclick="openCmdPalette()" title="Cmd+K">⌘K</button>
     <button class="btn btn-ghost" onclick="refresh()" title="R">⟳</button>
     <button class="btn btn-ghost" onclick="openBriefModal()" title="B">📄 BRIEF</button>
@@ -1233,7 +1255,7 @@ async function openSymbolModal(symbol) {
   html += '<div><div class="amber" style="font-size:9px;margin-bottom:3px;">SCAN (V5)</div>';
   if (sym) {
     const d = sym.tf_240 || {};
-    html += '<div class="stat"><span class="label">Price</span><span class="value amber">'+sym.price+'</span></div>';
+    html += '<div class="stat"><span class="label">Price</span><span class="value amber">'+pxOr(sym.price)+'</span></div>';
     Object.keys(d).forEach(k => {
       html += '<div class="stat"><span class="label">'+k+'</span><span class="value">'+d[k]+'</span></div>';
     });
@@ -1576,6 +1598,9 @@ function tvUrl(symbol) {
 function tvLink(symbol, label) {
   return '<a href="' + tvUrl(symbol) + '" target="_blank" title="Open ' + symbol + ' on TradingView" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--amber);">' + (label || symbol) + '</a>';
 }
+// Null-safe price render: MCP/scanner data is null when the Pine study feed is offline.
+// Show an em dash instead of the literal string "null" (reported UI bug).
+function pxOr(v) { return (v == null || v === '' || (typeof v === 'number' && isNaN(v))) ? '—' : v; }
 
 // ── INTRADAY DELTA (scan_history per-symbol price series) ──
 async function loadScanHistory() {
@@ -1659,7 +1684,7 @@ function renderHeatmap(scan) {
       + starIcon
       + deltaTxt
       + '<div class="hm-sym">'+s.symbol+'</div>'
-      + '<div class="hm-val">'+s.price+'</div>'
+      + '<div class="hm-val">'+pxOr(s.price)+'</div>'
       + '<div class="hm-sig" style="color:'+convCol+';">'+subText+'</div>'
       + '</a>';
   });
@@ -1846,7 +1871,7 @@ function renderTopMovers(scan) {
     const col = s.change > 0 ? 'green' : s.change < 0 ? 'red' : 'muted';
     const arrow = s.change > 0 ? '▲' : s.change < 0 ? '▼' : '·';
     html += '<tr><td><strong>'+tvLink(s.symbol)+'</strong></td>'
-      + '<td>'+s.price+'</td>'
+      + '<td>'+pxOr(s.price)+'</td>'
       + '<td class="'+col+'">'+arrow+' '+(s.change>=0?'+':'')+s.change.toFixed(2)+'%</td></tr>';
   });
   html += '</table>';
@@ -3218,7 +3243,7 @@ function renderTicker(scan) {
     const arrow = isBullish(htf) ? '▲' : isBearish(htf) ? '▼' : '·';
     return '<span class="tk-item">'
       + '<a href="' + tvUrl(s.symbol) + '" target="_blank" class="tk-sym" style="text-decoration:none;">' + s.symbol + '</a> '
-      + '<span class="tk-px">' + s.price + '</span> '
+      + '<span class="tk-px">' + pxOr(s.price) + '</span> '
       + '<span class="' + cls + '">' + arrow + '</span></span>';
   }).join('');
   el.innerHTML = toHTML(scan.symbols) + toHTML(scan.symbols);
@@ -3440,7 +3465,7 @@ async function refresh() {
       const struct = d.Structure||'—'; const htf = d['HTF (D)']||'—'; const zone = d.Zone||'—';
       const mtf = d['MTF (D/4H/cur)']||'—'; const conf = d.Confluence||'—';
       const sig = d.Signal||'NONE'; const wr = d.Record||'—'; const conv = d.Conviction||'—';
-      h += '<tr><td><strong>'+tvLink(s.symbol)+'</strong></td><td>'+s.price+'</td>'
+      h += '<tr><td><strong>'+tvLink(s.symbol)+'</strong></td><td>'+pxOr(s.price)+'</td>'
         + '<td class="'+(isBullish(struct)?'green':isBearish(struct)?'red':'')+'">'+struct+'</td>'
         + '<td class="'+(isBullish(htf)?'green':isBearish(htf)?'red':'')+'">'+htf+'</td>'
         + '<td>'+zone+'</td>'
@@ -3520,36 +3545,117 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   .trow.buy .tp{color:var(--g)}.trow.sell .tp{color:var(--r)}
   .trow.big{font-weight:700}.trow.big .tq{color:#fff}.trow .tq{color:#9aa7b4}.trow .tt{color:var(--muted);font-size:9px}
   .disc{color:var(--muted);font-size:9px;padding:0 14px 8px}
+  /* ── redesign additions ── */
+  *{font-variant-numeric:tabular-nums}
+  .num{font-variant-numeric:tabular-nums;text-align:right}
+  .wl{display:flex;gap:4px;flex-wrap:wrap}
+  .wchip{display:flex;flex-direction:column;align-items:center;min-width:52px;background:#0d1219;border:1px solid var(--border);border-radius:4px;padding:3px 6px;cursor:pointer;line-height:1.25}
+  .wchip.on{border-color:var(--cy);background:#0e1a22}
+  .wchip .wsym{font-weight:700;font-size:11px;color:var(--tx)}
+  .wchip.on .wsym{color:var(--cy)}
+  .wchip .wsub{font-size:8px;letter-spacing:.2px}
+  .wchip .wk{color:#5b6673;font-size:7px}
+  .dots{display:flex;gap:8px;align-items:center}
+  .dot{display:flex;align-items:center;gap:3px;font-size:9px;color:var(--muted)}
+  .dot i{width:7px;height:7px;border-radius:50%;background:#39424e;display:inline-block}
+  .dot.ok i{background:var(--g);box-shadow:0 0 4px var(--g)}
+  .dot.warn i{background:var(--y)}
+  .dot.err i{background:var(--r)}
+  .ribbon{flex:0 0 auto;display:flex;gap:0;align-items:stretch;background:#0c1016;border-bottom:1px solid var(--border);overflow-x:auto}
+  .rcell{display:flex;flex-direction:column;justify-content:center;padding:5px 12px;border-right:1px solid var(--border);min-width:90px;white-space:nowrap}
+  .rcell .rl{font-size:8px;letter-spacing:.6px;color:var(--muted);text-transform:uppercase}
+  .rcell .rv{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+  .rcell .rvsub{font-size:9px;color:var(--muted)}
+  .fundbar{height:3px;border-radius:2px;margin-top:2px;background:#1a2029;overflow:hidden}
+  .fundbar span{display:block;height:100%}
+  main.grid{display:grid;grid-template-columns:1.9fr 1fr 1.05fr;gap:8px;padding:8px;flex:1 1 auto;min-height:0}
+  @media(max-width:1100px){main.grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:800px){main.grid{grid-template-columns:1fr;overflow:auto;flex:none;height:auto}}
+  .col{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
+  .col.scroll{overflow:auto}
+  .lbl{font-size:9px;letter-spacing:.7px;color:var(--muted);text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+  .gauge{display:flex;align-items:center;gap:10px}
+  .gauge svg{flex:0 0 auto}
+  .gmeta{font-size:10px;line-height:1.5}
+  .gmeta b{font-size:14px}
+  .liqfeed{display:flex;flex-direction:column;gap:1px;overflow:auto;max-height:190px}
+  .liqrow{display:grid;grid-template-columns:38px 1fr auto auto;gap:6px;font-size:10px;padding:2px 6px;border-radius:2px;align-items:center}
+  .liqrow.long{background:rgba(255,70,70,.10)}.liqrow.short{background:rgba(40,220,120,.10)}
+  .liqrow .lt{color:var(--muted);font-size:8px}.liqrow .lsym{font-weight:700}
+  .liqrow.long .lside{color:var(--r)}.liqrow.short .lside{color:var(--g)}
+  .liqbar{display:flex;height:16px;border-radius:3px;overflow:hidden;border:1px solid var(--border);margin-bottom:6px;font-size:9px;font-weight:700}
+  .liqbar .ll{background:rgba(255,70,70,.35);color:#ffd9d9;display:flex;align-items:center;justify-content:flex-start;padding:0 5px}
+  .liqbar .ls{background:rgba(40,220,120,.30);color:#d9ffe9;display:flex;align-items:center;justify-content:flex-end;padding:0 5px}
+  .radar{flex:0 0 auto;display:flex;gap:0;border-top:1px solid var(--border);background:#0c1016;overflow-x:auto}
+  .rd{flex:1 1 0;min-width:70px;text-align:center;padding:4px 4px;border-right:1px solid var(--border);cursor:pointer}
+  .rd .rds{font-size:10px;font-weight:700;color:var(--tx)}
+  .rd .rdf{font-size:10px;font-variant-numeric:tabular-nums}
+  .rd .rdo{font-size:8px;color:var(--muted)}
+  .spark{display:block;width:100%;height:26px}
+  @keyframes flash{0%{background:rgba(255,193,77,.5)}100%{background:transparent}}
+  .flash{animation:flash .7s ease-out}
+  .cntf{font-variant-numeric:tabular-nums}
 </style></head><body>
 <header>
-  <span class="brand">🌊 ORDERFLOW LIVE</span>
-  <span id="syms"></span>
-  <span class="kv">bias <span id="bias" class="val">--</span></span>
-  <span class="kv" title="Delta cumule (taker buy - sell) depuis l'ouverture de la page, temps reel">session Δ <b id="sessd">--</b></span>
-  <span class="kv" title="Trades >= $25k depuis l'ouverture (achats/ventes agressifs)">whales <b id="whales">0/0</b></span>
-  <span class="kv"><b id="livedot" style="color:#6b7785" title="WebSocket temps reel: vert = stream actif, gris = fallback polling">●</b></span>
-  <span class="kv">updated <b id="ts">--</b></span>
-  <a class="link" href="/">full terminal →</a>
+  <span class="brand">🌊 ORDERFLOW</span>
+  <span id="syms" class="wl"></span>
+  <span class="kv" title="Delta cumule (taker buy - sell) depuis l'ouverture de la page, temps reel">Δ <b id="sessd">--</b></span>
+  <span class="kv" title="Trades >= $25k depuis l'ouverture (achats/ventes agressifs)">🐋 <b id="whales">0/0</b></span>
+  <span class="dots" style="margin-left:auto">
+    <span class="dot" id="dotWs" title="Trades WebSocket"><i></i>trades</span>
+    <span class="dot" id="dotLiq" title="Liquidations WebSocket"><i></i>liq</span>
+    <span class="dot" id="dotDrv" title="Derivatives poll (funding/OI)"><i></i>deriv</span>
+  </span>
+  <span class="kv">upd <b id="ts">--</b></span>
+  <a class="link" href="/help">? help</a>
+  <a class="link" href="/">terminal →</a>
 </header>
+<div class="ribbon" id="ribbon">
+  <div class="rcell"><span class="rl">Funding /8h</span><span class="rv cntf" id="rFund">--</span><span class="rvsub" id="rFundYr">-- /yr</span><div class="fundbar"><span id="rFundBar"></span></div></div>
+  <div class="rcell"><span class="rl">Next funding</span><span class="rv cntf" id="rFundCd">--:--</span><span class="rvsub" id="rFundState">--</span></div>
+  <div class="rcell"><span class="rl">Open Interest</span><span class="rv" id="rOi">--</span><span class="rvsub" id="rOiChg">--</span></div>
+  <div class="rcell"><span class="rl">L/S retail</span><span class="rv" id="rLsG">--</span><span class="rvsub">accounts</span></div>
+  <div class="rcell"><span class="rl">L/S top</span><span class="rv" id="rLsT">--</span><span class="rvsub">smart money</span></div>
+  <div class="rcell"><span class="rl">Taker buy%</span><span class="rv" id="rTaker">--</span><span class="rvsub">futures agg</span></div>
+  <div class="rcell"><span class="rl">Venue gap</span><span class="rv" id="rGap">--</span><span class="rvsub">Binance-HL</span></div>
+  <div class="rcell"><span class="rl">Bias</span><span class="rv" id="bias">--</span><span class="rvsub" id="biasReg">--</span></div>
+</div>
 <div class="alertstrip" id="alertstrip"></div>
-<main>
+<main class="grid">
   <section class="chartwrap"><div class="chead"><b id="csym">BTC</b><span class="muted">·</span><span id="cprice" class="price">--</span><span id="ivbtns"></span></div><div class="canvasbox"><canvas id="chart"></canvas></div></section>
-  <aside>
+  <aside class="col scroll">
     <div class="card">
+      <div class="lbl"><span>Flow · order-book pressure</span></div>
       <div class="stats" id="flow"></div>
       <div class="notes" id="notes" style="margin-top:8px"></div>
     </div>
     <div class="card">
-      <div class="hmhead"><span>Trades tape &middot; time &amp; sales</span><span class="muted">buy / sell aggressor</span></div>
+      <div class="lbl"><span>Long/Short · squeeze</span></div>
+      <div class="gauge"><div id="gaugeBox"></div><div class="gmeta" id="gaugeMeta"></div></div>
+    </div>
+    <div class="card">
+      <div class="lbl"><span>Order-book imbalance (OBI)</span><span class="muted" id="obiNow">--</span></div>
+      <canvas class="spark" id="obiSpark"></canvas>
+    </div>
+  </aside>
+  <aside class="col">
+    <div class="card">
+      <div class="lbl"><span>Liquidations · last 5m</span><span class="muted" id="liqTot">--</span></div>
+      <div class="liqbar"><span class="ll" id="liqL">long --</span><span class="ls" id="liqS">-- short</span></div>
+      <div class="liqfeed" id="liqfeed"><div class="muted" style="font-size:10px">waiting for liquidation prints…</div></div>
+    </div>
+    <div class="card" style="flex:0 0 auto">
+      <div class="lbl"><span>Trades tape</span><span class="muted">buy / sell aggressor</span></div>
       <div class="tape" id="tape"></div>
     </div>
     <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
-      <div class="hmhead"><span>Liquidity heatmap · order book</span><span>mid <b id="mid" style="color:#cfd8e3">--</b> · spread <b id="spread" style="color:#cfd8e3">--</b></span></div>
+      <div class="lbl"><span>Liquidity heatmap</span><span>mid <b id="mid" style="color:#cfd8e3">--</b> · <b id="spread" style="color:#cfd8e3">--</b></span></div>
       <div class="heatmap" id="heatmap"></div>
     </div>
   </aside>
 </main>
-<div class="disc">Real Binance data · CVD = true taker buy/sell (1m klines) · heatmap = live order-book resting liquidity · confluence lens, backtest before trading · crypto = watch-only</div>
+<div class="radar" id="radar" title="Funding heat across the watchlist — click to switch symbol"></div>
+<div class="disc">Real Binance spot + futures data · CVD = true taker buy/sell · funding/OI/L-S/liquidations = Binance Futures + Hyperliquid cross-venue · confluence lens, backtest before trading · crypto = watch-only</div>
 <script>
   var SYMS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT'];
   var cur='BTCUSDT';
@@ -3557,6 +3663,106 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   try{var ss=localStorage.getItem('ofSym');if(ss&&SYMS.indexOf(ss)>=0)cur=ss;
       var si=localStorage.getItem('ofIv');if(si&&['1m','5m','15m','1h'].indexOf(si)>=0)IV=si;}catch(e){}
   function pp(p){return p>=1000?1:p>=1?2:p>=0.01?5:7;}
+  // ── shared helpers (null-safe: never render the raw string "null") ──
+  function fmt(n,d){ if(n==null||isNaN(n))return '--'; d=d==null?2:d; var a=Math.abs(n);
+    if(a>=1e9)return (n/1e9).toFixed(2)+'B'; if(a>=1e6)return (n/1e6).toFixed(2)+'M'; if(a>=1e3)return (n/1e3).toFixed(1)+'K'; return n.toFixed(d); }
+  function pct(n,d){ return n==null||isNaN(n)?'--':(n>=0?'+':'')+n.toFixed(d==null?2:d)+'%'; }
+  function setDot(id,state){ var e=document.getElementById(id); if(e)e.className='dot '+(state||''); }
+  // ── liquidation rolling buffer (fed by SSE 'liq' events) ──
+  var LIQS=[],liqLong5=0,liqShort5=0;
+  function pushLiq(x){ x.rt=Date.now(); LIQS.unshift(x); if(LIQS.length>80)LIQS.length=80; liqDirty=true; }
+  var liqDirty=false;
+  function renderLiqs(){
+    if(!liqDirty)return; liqDirty=false;
+    var cut=Date.now()-5*60*1000; liqLong5=0;liqShort5=0;
+    for(var i=0;i<LIQS.length;i++){ if(LIQS[i].rt>=cut){ if(LIQS[i].side==='long')liqLong5+=LIQS[i].usd; else liqShort5+=LIQS[i].usd; } }
+    var tot=liqLong5+liqShort5;
+    var lp=tot>0?Math.round(liqLong5/tot*100):50;
+    var ll=document.getElementById('liqL'),ls=document.getElementById('liqS'),lt=document.getElementById('liqTot');
+    if(ll){ll.style.width=lp+'%';ll.textContent='long $'+fmt(liqLong5);}
+    if(ls){ls.style.width=(100-lp)+'%';ls.textContent='$'+fmt(liqShort5)+' short';}
+    if(lt)lt.textContent='$'+fmt(tot);
+    var el=document.getElementById('liqfeed'); if(!el)return;
+    if(!LIQS.length){el.innerHTML='<div class="muted" style="font-size:10px">waiting for liquidation prints…</div>';return;}
+    var h='';
+    for(var j=0;j<LIQS.length&&j<40;j++){ var x=LIQS[j]; var t=new Date(x.t);
+      h+='<div class="liqrow '+x.side+'"><span class="lsym">'+(x.sym||'').replace('USDT','')+'</span>'+
+         '<span class="lside">'+(x.side==='long'?'LONG rekt':'SHORT rekt')+'</span>'+
+         '<span class="num">$'+fmt(x.usd)+'</span>'+
+         '<span class="lt">'+('0'+t.getHours()).slice(-2)+':'+('0'+t.getMinutes()).slice(-2)+':'+('0'+t.getSeconds()).slice(-2)+'</span></div>'; }
+    el.innerHTML=h;
+    var first=el.firstChild; if(first&&first.classList){first.classList.remove('flash');void first.offsetWidth;first.classList.add('flash');}
+  }
+  // ── derivatives ribbon + funding countdown + radar (from /api/derivatives) ──
+  var DERIV={},fundNextTs=null;
+  function fundColor(annual){ if(annual==null)return '#6b7785'; if(annual>30)return '#ff4646'; if(annual>10)return '#ffc14d'; if(annual<-10)return '#3fd0ff'; if(annual<0)return '#7ee0ff'; return '#28dc78'; }
+  async function loadDerivs(){
+    try{
+      var d=await fetch('/api/derivatives').then(function(r){return r.json();}); DERIV=d.symbols||{}; setDot('dotDrv','ok');
+      var s=DERIV[cur]; if(!s){ setDot('dotDrv','warn'); return; }
+      var col=fundColor(s.funding_annual_pct);
+      document.getElementById('rFund').textContent=s.funding!=null?(s.funding*100).toFixed(4)+'%':'--';
+      document.getElementById('rFund').style.color=col;
+      document.getElementById('rFundYr').textContent=s.funding_annual_pct!=null?pct(s.funding_annual_pct,1)+' /yr':'-- /yr';
+      var fb=document.getElementById('rFundBar'); if(fb){var w=Math.min(100,Math.abs(s.funding_annual_pct||0)/50*100);fb.style.width=w+'%';fb.style.background=col;}
+      document.getElementById('rFundState').textContent=(s.funding_state||'--').replace(/-/g,' ');
+      document.getElementById('rFundState').style.color=col;
+      fundNextTs=s.next_funding_time||null;
+      document.getElementById('rOi').textContent='$'+fmt(s.oi_value);
+      var oc=document.getElementById('rOiChg'); oc.textContent=pct(s.oi_change_24h_pct)+' 24h'; oc.style.color=(s.oi_change_24h_pct||0)>=0?'#28dc78':'#ff4646';
+      document.getElementById('rLsG').textContent=fmt(s.ls_global,2);
+      document.getElementById('rLsG').style.color=(s.ls_global||1)>1?'#28dc78':'#ff4646';
+      document.getElementById('rLsT').textContent=fmt(s.ls_top,2);
+      document.getElementById('rLsT').style.color=(s.ls_top||1)>1?'#28dc78':'#ff4646';
+      var tk=s.taker_ratio; document.getElementById('rTaker').textContent=tk!=null?(tk/(1+tk)*100).toFixed(0)+'%':'--';
+      document.getElementById('rGap').textContent=s.funding_venue_gap!=null?(s.funding_venue_gap>=0?'+':'')+s.funding_venue_gap+'bp':'--';
+      renderGauge(s); renderRadar();
+      if(typeof buildWatchlist==='function')buildWatchlist(); // refresh funding minis on the chips
+    }catch(e){ setDot('dotDrv','err'); }
+  }
+  function tickFundCd(){ var e=document.getElementById('rFundCd'); if(!e||!fundNextTs){if(e)e.textContent='--:--';return;}
+    var ms=fundNextTs-Date.now(); if(ms<0){e.textContent='00:00';return;} var m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000);
+    e.textContent=('0'+m).slice(-2)+':'+('0'+s).slice(-2); }
+  // SVG long/short + squeeze gauge
+  function renderGauge(s){
+    var box=document.getElementById('gaugeBox'),meta=document.getElementById('gaugeMeta'); if(!box)return;
+    var ls=s.ls_global||1; var longPct=Math.max(5,Math.min(95,ls/(1+ls)*100));
+    var ang=-90+(longPct/100)*180; var r=34,cx=42,cy=42;
+    var x=cx+r*Math.cos(ang*Math.PI/180),y=cy+r*Math.sin(ang*Math.PI/180);
+    box.innerHTML='<svg width="84" height="52" viewBox="0 0 84 50">'+
+      '<path d="M8 42 A34 34 0 0 1 76 42" fill="none" stroke="#1e2630" stroke-width="7"/>'+
+      '<path d="M8 42 A34 34 0 0 1 42 8" fill="none" stroke="#28dc78" stroke-width="7" opacity="0.5"/>'+
+      '<path d="M42 8 A34 34 0 0 1 76 42" fill="none" stroke="#ff4646" stroke-width="7" opacity="0.5"/>'+
+      '<line x1="42" y1="42" x2="'+x.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="#cfd8e3" stroke-width="2"/>'+
+      '<circle cx="42" cy="42" r="3" fill="#cfd8e3"/></svg>';
+    var squeeze=''; var fa=s.funding_annual_pct;
+    if(fa>30&&ls>1.4)squeeze='<b class="r">LONG SQUEEZE RISK</b>';
+    else if(fa<-10&&ls<0.8)squeeze='<b class="g">SHORT SQUEEZE RISK</b>';
+    else squeeze='<span class="muted">balanced</span>';
+    meta.innerHTML='<div><b style="color:'+((ls>1)?'#28dc78':'#ff4646')+'">'+longPct.toFixed(0)+'%</b> long / '+(100-longPct).toFixed(0)+'% short</div>'+
+      '<div class="muted">retail L/S '+fmt(ls,2)+' · smart '+fmt(s.ls_top,2)+'</div>'+'<div>'+squeeze+'</div>';
+  }
+  function renderRadar(){
+    var el=document.getElementById('radar'); if(!el)return; var h='';
+    for(var i=0;i<SYMS.length;i++){ var sy=SYMS[i],d=DERIV[sy]||{}; var col=fundColor(d.funding_annual_pct);
+      h+='<div class="rd" data-s="'+sy+'" style="background:'+(sy===cur?'#0e1a22':'transparent')+'">'+
+         '<div class="rds"'+(sy===cur?' style="color:#3fd0ff"':'')+'>'+sy.replace('USDT','')+'</div>'+
+         '<div class="rdf" style="color:'+col+'">'+(d.funding_annual_pct!=null?pct(d.funding_annual_pct,0):'--')+'</div>'+
+         '<div class="rdo">OI '+(d.oi_value!=null?'$'+fmt(d.oi_value):'--')+'</div></div>'; }
+    el.innerHTML=h;
+  }
+  // OBI sparkline (client-buffered from loadFlow OBI values)
+  var OBI=[];
+  function pushObi(v){ if(v==null||isNaN(v))return; OBI.push(v); if(OBI.length>120)OBI.shift(); drawObi(); }
+  function drawObi(){ var cv=document.getElementById('obiSpark'); if(!cv||!OBI.length)return;
+    var dpr=window.devicePixelRatio||1,W=cv.clientWidth||220,H=cv.clientHeight||26; cv.width=W*dpr;cv.height=H*dpr;
+    var x=cv.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0); x.clearRect(0,0,W,H);
+    var mn=Math.min.apply(null,OBI),mx=Math.max.apply(null,OBI),rg=(mx-mn)||1;
+    var zy=H-(0-mn)/rg*H; x.strokeStyle='rgba(255,255,255,.10)'; x.beginPath();x.moveTo(0,zy);x.lineTo(W,zy);x.stroke();
+     x.beginPath(); for(var i=0;i<OBI.length;i++){var px=i/(OBI.length-1||1)*W,py=H-(OBI[i]-mn)/rg*H; if(i===0) x.moveTo(px,py);else x.lineTo(px,py);}
+     x.strokeStyle=OBI[OBI.length-1]>=0?'#28dc78':'#ff4646';x.lineWidth=1.3; x.stroke();
+    var oe=document.getElementById('obiNow'); if(oe){var last=OBI[OBI.length-1];oe.textContent=(last>=0?'+':'')+last.toFixed(2);oe.style.color=last>=0?'#28dc78':'#ff4646';}
+  }
   var _audio=null;
   function beep(freq){try{_audio=_audio||new (window.AudioContext||window.webkitAudioContext)();var o=_audio.createOscillator(),g=_audio.createGain();o.type='sine';o.frequency.value=freq||640;g.gain.value=0.05;o.connect(g);g.connect(_audio.destination);o.start();o.stop(_audio.currentTime+0.13);}catch(e){}}
   var _lastDiv;
@@ -3629,22 +3835,34 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
       var pe=document.getElementById('cprice');if(pe){pe.textContent=last.toFixed(pp(last));pe.className='price '+(cs[n-1].c>=cs[n-1].o?'g':'r');}
     }catch(e){msg('chart error: '+((e&&e.message)||e),'#ff4646');}
   }
-  function setSym(s){cur=s;try{localStorage.setItem('ofSym',s);}catch(e){}var b=document.querySelectorAll('.symbtn');for(var i=0;i<b.length;i++){b[i].classList.toggle('on',b[i].getAttribute('data-s')===s);}
-    TAPE=[];sessDelta=0;whaleB=0;whaleS=0;WMARKS=[];tapeDirty=true;renderSess();startStream();drawChart();refresh();}
+  function setSym(s){
+    if(!s||SYMS.indexOf(s)<0)return;
+    cur=s;try{localStorage.setItem('ofSym',s);}catch(e){}
+    // highlight the selected watchlist chip (new .wchip strip; radar is re-rendered by loadDerivs)
+    var b=document.querySelectorAll('.wchip');for(var i=0;i<b.length;i++){b[i].classList.toggle('on',b[i].getAttribute('data-s')===s);}
+    var ce=document.getElementById('csym');if(ce)ce.textContent=s.replace('USDT','');
+    // reset per-symbol session state so counters/tape/liq don't carry across symbols
+    TAPE=[];sessDelta=0;whaleB=0;whaleS=0;WMARKS=[];tapeDirty=true;LIQS=[];liqDirty=true;OBI=[];
+    _depthBusy=false; // let the new symbol's depth load immediately instead of waiting on the old in-flight fetch
+    var hm=document.getElementById('heatmap');if(hm)hm.__last=null;
+    renderSess();renderLiqs();startStream();drawChart();refresh();loadDerivs();
+  }
   function stat(l,v,c){return '<div class="s"><span class="sl">'+l+'</span><span class="sv '+(c||'')+'">'+v+'</span></div>';}
   function regCol(r){r=r||'';return (r.indexOf('BULL')>=0||r==='ACCUMULATION')?'g':(r.indexOf('BEAR')>=0||r==='DISTRIBUTION')?'r':'y';}
   async function loadFlow(){
     try{
       var o=await fetch('/api/orderflow').then(function(r){return r.json();});
       var bias=(o.summary&&o.summary.net_bias)||'--';
-      var be=document.getElementById('bias');be.textContent=bias;be.className='val '+(bias==='NET_BULLISH'?'g':bias==='NET_BEARISH'?'r':'y');
+      var be=document.getElementById('bias');be.textContent=(bias||'--').replace('NET_','');be.className='rv '+(bias==='NET_BULLISH'?'g':bias==='NET_BEARISH'?'r':'y');
       var te=document.getElementById('ts');
       if(te&&o.timestamp){var ageS=(Date.now()-new Date(o.timestamp).getTime())/1000;te.textContent=new Date(o.timestamp).toLocaleTimeString()+(ageS>120?' (STALE)':'');te.style.color=ageS>120?'#ff4646':'';}
       updateAlerts((o.summary&&o.summary.divergences)||[]);
       var s=(o.symbols||[]).filter(function(x){return x.symbol===cur;})[0];
       if(!s){document.getElementById('flow').innerHTML='<div class="muted">no flow data</div>';document.getElementById('notes').textContent='';return;}
+      pushObi(s.obi); // buffer OBI for the sparkline
       var dv=s.divergence?'<span class="tag">'+s.divergence+'</span>':'';
       var rg=s.regime||'NEUTRAL';var wm=s.window_min||30;
+      var brg=document.getElementById('biasReg');if(brg){brg.textContent=rg.replace('_',' ');brg.className='rvsub '+regCol(rg);}
       document.getElementById('flow').innerHTML=
         stat('CVD ('+wm+'m)',(s.cvd>=0?'+':'')+Math.round(s.cvd||0),s.cvd>0?'g':'r')+
         stat('Last delta',(s.last_delta>=0?'+':'')+Math.round(s.last_delta||0),s.last_delta>0?'g':'r')+
@@ -3655,7 +3873,10 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
       document.getElementById('notes').textContent=s.notes&&s.notes!=='--'?s.notes:'';
     }catch(e){}
   }
+  var _depthBusy=false;
   async function loadDepth(){
+    if(_depthBusy)return; // in-flight guard: depth fetch takes ~5-6s, don't stack overlapping polls
+    _depthBusy=true;
     try{
       var d=await fetch('/api/orderflow-depth?symbol='+cur).then(function(r){return r.json();});
       var el=document.getElementById('heatmap');
@@ -3674,6 +3895,7 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
       document.getElementById('mid').textContent=d.mid;
       document.getElementById('spread').textContent=(d.spread_bps<0.01?'<0.01':d.spread_bps)+' bps';
     }catch(e){var eh=document.getElementById('heatmap');if(eh&&!eh.children.length)eh.innerHTML='<div class="muted">depth: reconnexion…</div>';}
+    finally{_depthBusy=false;}
   }
   // ── Real-time stream (SSE relay of Binance aggTrade). Polling below stays as automatic fallback. ──
   var es=null,streamOk=false,TAPE=[],tapeDirty=false,sessDelta=0,whaleB=0,whaleS=0,WHALE_USD=25000,WMARKS=[];
@@ -3695,10 +3917,10 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     var w=document.getElementById('whales');
     if(w){w.innerHTML='<span style="color:#28dc78">'+whaleB+'</span>/<span style="color:#ff4646">'+whaleS+'</span>';}
   }
-  function setLive(on){streamOk=on;var d=document.getElementById('livedot');if(d){d.style.color=on?'#28dc78':'#6b7785';d.title=on?'Stream temps reel ACTIF (WebSocket Binance)':'Stream coupe -- fallback polling 2s';}}
+  function setLive(on){streamOk=on;setDot('dotWs',on?'ok':'warn');}
   function startStream(){
     if(es){try{es.close();}catch(e){}es=null;}
-    setLive(false);
+    setLive(false);setDot('dotLiq','warn');
     if(typeof EventSource==='undefined')return;
     try{
       es=new EventSource('/api/orderflow-stream?symbol='+cur);
@@ -3711,11 +3933,18 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
           WMARKS.push({t:x.t,p:x.p,side:x.side,n:x.p*x.q});if(WMARKS.length>200)WMARKS.shift();}
         var pe=document.getElementById('cprice');if(pe){pe.textContent=x.p;pe.className='price '+(x.side==='buy'?'g':'r');}
       });
-      es.onerror=function(){setLive(false);};
+      // Liquidation prints (Binance forceOrder) relayed on the same SSE connection.
+      es.addEventListener('liq',function(ev){
+        var x;try{x=JSON.parse(ev.data);}catch(e){return;}
+        setDot('dotLiq','ok'); x.sym=cur; pushLiq(x);
+      });
+      es.onerror=function(){setLive(false);setDot('dotLiq','err');};
     }catch(e){setLive(false);}
   }
   setInterval(renderTape,400);   // throttled paint: busy markets stream many trades/sec
   setInterval(renderSess,800);
+  setInterval(renderLiqs,600);
+  setInterval(tickFundCd,1000);  // live countdown to next funding
   async function loadTape(){
     if(streamOk)return; // stream is painting the tape; polling is fallback only
     try{
@@ -3726,20 +3955,44 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     }catch(e){var et=document.getElementById('tape');if(et&&!TAPE.length)et.innerHTML='<div class="muted">tape: reconnexion…</div>';}
   }
   function refresh(){loadFlow();loadDepth();loadTape();}
+  // Build the watchlist strip: one chip per symbol with mini funding% + 24h. Rebuilt each
+  // derivatives poll so the minis stay live; the click handler is delegated on the container.
+  function buildWatchlist(){
+    var sc=document.getElementById('syms');if(!sc)return;
+    var html='';
+    for(var i=0;i<SYMS.length;i++){var s=SYMS[i],d=DERIV[s]||{};
+      var fc=fundColor(d.funding_annual_pct);
+      html+='<div class="wchip'+(s===cur?' on':'')+'" data-s="'+s+'" title="'+s+' — key '+(i+1)+'">'+
+            '<span class="wsym">'+s.replace('USDT','')+'</span>'+
+            '<span class="wsub" style="color:'+fc+'">'+(d.funding_annual_pct!=null?pct(d.funding_annual_pct,0):'--')+'</span>'+
+            '<span class="wk">'+(i+1)+'</span></div>';
+    }
+    sc.innerHTML=html;
+  }
   (function init(){
-    var html='';for(var i=0;i<SYMS.length;i++){var s=SYMS[i];html+='<button class="symbtn'+(s===cur?' on':'')+'" data-s="'+s+'">'+s.replace('USDT','')+'</button> ';}
-    var sc=document.getElementById('syms');sc.innerHTML=html;
-    sc.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.symbtn'):null;if(b)setSym(b.getAttribute('data-s'));});
+    buildWatchlist();
+    var sc=document.getElementById('syms');
+    sc.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.wchip'):null;if(b)setSym(b.getAttribute('data-s'));});
+    // radar (funding heat) is also a symbol switcher
+    var rad=document.getElementById('radar');
+    if(rad)rad.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.rd'):null;if(b)setSym(b.getAttribute('data-s'));});
     var IVS=['1m','5m','15m','1h'];var ie='';for(var j=0;j<IVS.length;j++){ie+='<button class="ivbtn'+(IVS[j]===IV?' on':'')+'" data-iv="'+IVS[j]+'">'+IVS[j]+'</button>';}
-    var ib=document.getElementById('ivbtns');if(ib){ib.innerHTML=ie;ib.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.ivbtn'):null;if(!b)return;IV=b.getAttribute('data-iv');try{localStorage.setItem('ofIv',IV);}catch(e){}var bs=ib.querySelectorAll('.ivbtn');for(var k=0;k<bs.length;k++)bs[k].classList.toggle('on',bs[k].getAttribute('data-iv')===IV);drawChart();});}
-    startStream();drawChart();refresh();
-    var rt;window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(drawChart,150);});
-    // Pause all polling when the tab is hidden (no wasted Binance calls), resume + refresh on return.
+    var ib=document.getElementById('ivbtns');if(ib){ib.innerHTML=ie;ib.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.ivbtn'):null;if(!b)return;setIV(b.getAttribute('data-iv'));});}
+    function setIV(v){IV=v;try{localStorage.setItem('ofIv',IV);}catch(e){}var bs=document.querySelectorAll('.ivbtn');for(var k=0;k<bs.length;k++)bs[k].classList.toggle('on',bs[k].getAttribute('data-iv')===IV);drawChart();}
+    // Keyboard: 1-8 select symbol, [ / ] cycle timeframe (documented on /help).
+    document.addEventListener('keydown',function(e){
+      if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
+      var n=parseInt(e.key,10); if(n>=1&&n<=SYMS.length){setSym(SYMS[n-1]);return;}
+      if(e.key==='['||e.key===']'){var idx=IVS.indexOf(IV);idx=(idx+(e.key===']'?1:IVS.length-1))%IVS.length;setIV(IVS[idx]);}
+    });
+    setSym(cur); // single source of truth: paints highlight + starts stream + first loads
+    loadDerivs();
+    var rt;window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(function(){drawChart();drawObi();},150);});
     var timers=[];
-    function startTimers(){if(timers.length)return;timers=[setInterval(drawChart,5000),setInterval(loadDepth,4000),setInterval(loadTape,2000),setInterval(loadFlow,15000)];}
+    function startTimers(){if(timers.length)return;timers=[setInterval(drawChart,5000),setInterval(loadDepth,6000),setInterval(loadTape,2000),setInterval(loadFlow,12000),setInterval(loadDerivs,20000)];}
     function stopTimers(){for(var i=0;i<timers.length;i++)clearInterval(timers[i]);timers=[];}
     startTimers();
-    document.addEventListener('visibilitychange',function(){if(document.hidden){stopTimers();}else{refresh();drawChart();startTimers();}});
+    document.addEventListener('visibilitychange',function(){if(document.hidden){stopTimers();}else{refresh();drawChart();loadDerivs();startTimers();}});
   })();
 </script></body></html>`;
 
@@ -3748,36 +4001,72 @@ const LIVE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 // (no hung sockets piling up under the /live page's 2-4s polling).
 const OF_SYM = s => /^[A-Z0-9]{5,12}$/.test(s);
 const ofFetch = u => fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(9000) });
+// Depth needs a longer budget: the Binance order book takes ~5-7s from this region and 9s
+// clipped it intermittently. 13s comfortably clears the observed worst case.
+const ofFetchDepth = u => fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(13000) });
+
+// Binance depth (order book) takes ~5-6s from this region, but the /live page polls it every
+// few seconds -- overlapping requests piled up and tripped the 9s timeout (endpoint returned
+// 000/aborted). A 3s per-symbol cache + in-flight dedup means rapid/overlapping polls reuse
+// one snapshot instead of hammering Binance. The book barely moves in 3s, so no visible cost.
+const _depthCache = new Map();     // sym -> { ts, data }
+const _depthInflight = new Map();  // sym -> Promise<data>
+const DEPTH_TTL = 3000;
+
+async function computeDepth(sym) {
+  const r = await ofFetchDepth('https://api.binance.com/api/v3/depth?symbol=' + sym + '&limit=100');
+  if (!r.ok) return { symbol: sym, error: 'binance ' + r.status, levels: [] };
+  const d = await r.json();
+  if (!d.bids || !d.asks || !d.bids.length || !d.asks.length) return { symbol: sym, error: 'no depth', levels: [] };
+  const bestBid = parseFloat(d.bids[0][0]), bestAsk = parseFloat(d.asks[0][0]);
+  const mid = (bestBid + bestAsk) / 2;
+  if (!Number.isFinite(mid) || mid <= 0) return { symbol: sym, error: 'bad depth', levels: [] };
+  // Size the band from the book actually received (100 levels/side), capped at 0.35% of mid.
+  // A fixed band on a tight BTC book rendered dozens of empty 0.00 rows past the real depth.
+  const lastAsk = parseFloat(d.asks[d.asks.length - 1][0]);
+  const lastBid = parseFloat(d.bids[d.bids.length - 1][0]);
+  const span = Math.max(mid * 0.0002, Math.min(mid * 0.0035, Math.max(lastAsk - mid, mid - lastBid)));
+  const nSide = 18, bucket = span / nSide;
+  const asks = new Array(nSide).fill(0), bids = new Array(nSide).fill(0);
+  for (const [p, q] of d.asks) { const i = Math.floor((parseFloat(p) - mid) / bucket); if (i >= 0 && i < nSide) asks[i] += parseFloat(q); }
+  for (const [p, q] of d.bids) { const i = Math.floor((mid - parseFloat(p)) / bucket); if (i >= 0 && i < nSide) bids[i] += parseFloat(q); }
+  // Trim the empty far tail on each side (keep at least 8 rows/side) so every visible row carries information.
+  let askN = nSide, bidN = nSide;
+  while (askN > 8 && asks[askN - 1] === 0) askN--;
+  while (bidN > 8 && bids[bidN - 1] === 0) bidN--;
+  const prec = Math.min(12, Math.max(2, Math.ceil(-Math.log10(bucket)) + 1)), levels = []; // scale precision to bucket so micro-priced coins don't collapse to identical rows
+  for (let i = askN - 1; i >= 0; i--) levels.push({ price: +(mid + (i + 0.5) * bucket).toFixed(prec), vol: +asks[i].toFixed(3), side: 'ask' });
+  for (let i = 0; i < bidN; i++) levels.push({ price: +(mid - (i + 0.5) * bucket).toFixed(prec), vol: +bids[i].toFixed(3), side: 'bid' });
+  const maxVol = Math.max(1e-9, ...levels.map(l => l.vol));
+  return { symbol: sym, ts: Date.now(), mid: +mid.toFixed(prec), spread_bps: +(((bestAsk - bestBid) / mid) * 10000).toFixed(3), maxVol: +Math.max(1e-6, maxVol).toFixed(6), levels };
+}
+
 app.get('/api/orderflow-depth', async (req, res) => {
   const sym = String(req.query.symbol || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!OF_SYM(sym)) return res.json({ symbol: sym, error: 'bad symbol', levels: [] });
+  const cached = _depthCache.get(sym);
+  if (cached && Date.now() - cached.ts < DEPTH_TTL) return res.json(cached.data);
   try {
-    const r = await ofFetch('https://api.binance.com/api/v3/depth?symbol=' + sym + '&limit=100');
-    if (!r.ok) return res.json({ symbol: sym, error: 'binance ' + r.status, levels: [] });
-    const d = await r.json();
-    if (!d.bids || !d.asks || !d.bids.length || !d.asks.length) return res.json({ symbol: sym, error: 'no depth', levels: [] });
-    const bestBid = parseFloat(d.bids[0][0]), bestAsk = parseFloat(d.asks[0][0]);
-    const mid = (bestBid + bestAsk) / 2;
-    if (!Number.isFinite(mid) || mid <= 0) return res.json({ symbol: sym, error: 'bad depth', levels: [] });
-    // Size the band from the book actually received (100 levels/side), capped at 0.35% of mid.
-    // A fixed band on a tight BTC book rendered dozens of empty 0.00 rows past the real depth.
-    const lastAsk = parseFloat(d.asks[d.asks.length - 1][0]);
-    const lastBid = parseFloat(d.bids[d.bids.length - 1][0]);
-    const span = Math.max(mid * 0.0002, Math.min(mid * 0.0035, Math.max(lastAsk - mid, mid - lastBid)));
-    const nSide = 18, bucket = span / nSide;
-    const asks = new Array(nSide).fill(0), bids = new Array(nSide).fill(0);
-    for (const [p, q] of d.asks) { const i = Math.floor((parseFloat(p) - mid) / bucket); if (i >= 0 && i < nSide) asks[i] += parseFloat(q); }
-    for (const [p, q] of d.bids) { const i = Math.floor((mid - parseFloat(p)) / bucket); if (i >= 0 && i < nSide) bids[i] += parseFloat(q); }
-    // Trim the empty far tail on each side (keep at least 8 rows/side) so every visible row carries information.
-    let askN = nSide, bidN = nSide;
-    while (askN > 8 && asks[askN - 1] === 0) askN--;
-    while (bidN > 8 && bids[bidN - 1] === 0) bidN--;
-    const prec = Math.min(12, Math.max(2, Math.ceil(-Math.log10(bucket)) + 1)), levels = []; // scale precision to bucket so micro-priced coins don't collapse to identical rows
-    for (let i = askN - 1; i >= 0; i--) levels.push({ price: +(mid + (i + 0.5) * bucket).toFixed(prec), vol: +asks[i].toFixed(3), side: 'ask' });
-    for (let i = 0; i < bidN; i++) levels.push({ price: +(mid - (i + 0.5) * bucket).toFixed(prec), vol: +bids[i].toFixed(3), side: 'bid' });
-    const maxVol = Math.max(1e-9, ...levels.map(l => l.vol));
-    res.json({ symbol: sym, ts: Date.now(), mid: +mid.toFixed(prec), spread_bps: +(((bestAsk - bestBid) / mid) * 10000).toFixed(3), maxVol: +Math.max(1e-6, maxVol).toFixed(6), levels });
-  } catch (e) { res.json({ symbol: sym, error: e.message, levels: [] }); }
+    // Dedup concurrent requests for the same symbol onto one Binance fetch.
+    let p = _depthInflight.get(sym);
+    if (!p) {
+      p = computeDepth(sym);
+      _depthInflight.set(sym, p);
+      // clear on settle. Pass the same handler for fulfil AND reject so p's rejection is
+      // handled here (not just by `await p`) -- a dangling p.finally() branch rejected on
+      // timeout with no catch and crashed the whole process (unhandledRejection).
+      const clear = () => { if (_depthInflight.get(sym) === p) _depthInflight.delete(sym); };
+      p.then(clear, clear);
+    }
+    const data = await p;
+    if (!data.error) _depthCache.set(sym, { ts: Date.now(), data }); // cache good snapshots only
+    res.json(data);
+  } catch (e) {
+    // On timeout/error, serve the last good snapshot (even if older than TTL) so the heatmap
+    // holds instead of blanking; only fall back to an error when we have nothing cached.
+    if (cached) return res.json({ ...cached.data, stale: true });
+    res.json({ symbol: sym, error: e.message, levels: [] });
+  }
 });
 
 // ── Live trades tape (time & sales) from Binance aggTrades, true buy/sell classification ──
@@ -3799,11 +4088,11 @@ app.get('/api/orderflow-trades', async (req, res) => {
 // ── Real-time trades stream: ONE upstream Binance WebSocket per symbol (Node>=21 native WS),
 //    fanned out to any number of browser tabs via Server-Sent Events. No new dependency.
 //    Client falls back to REST polling if this endpoint errors. ──
-const OF_STREAMS = new Map(); // sym -> { ws, clients:Set<res> }
+const OF_STREAMS = new Map(); // sym -> { ws, liqWs, clients:Set<res> }
 function ofStreamEnsure(sym) {
   let s = OF_STREAMS.get(sym);
   if (s && s.ws && s.ws.readyState <= 1) return s;
-  if (!s) { s = { ws: null, clients: new Set() }; OF_STREAMS.set(sym, s); }
+  if (!s) { s = { ws: null, liqWs: null, clients: new Set() }; OF_STREAMS.set(sym, s); }
   const ws = new WebSocket('wss://stream.binance.com:9443/ws/' + sym.toLowerCase() + '@aggTrade');
   s.ws = ws;
   ws.onmessage = (ev) => {
@@ -3817,7 +4106,25 @@ function ofStreamEnsure(sym) {
     if (OF_STREAMS.get(sym) === s && s.clients.size) setTimeout(() => { if (s.clients.size) { s.ws = null; ofStreamEnsure(sym); } }, 2000);
   };
   ws.onerror = () => { try { ws.close(); } catch {} };
+  ofLiqEnsure(sym, s);
   return s;
+}
+// Liquidation stream (Binance Futures forceOrder). Same SSE fan-out, "liq" event.
+// o.S = the taker side of the liquidation order: SELL => a LONG got liquidated, BUY => a SHORT.
+function ofLiqEnsure(sym, s) {
+  if (s.liqWs && s.liqWs.readyState <= 1) return;
+  const lw = new WebSocket('wss://fstream.binance.com/ws/' + sym.toLowerCase() + '@forceOrder');
+  s.liqWs = lw;
+  lw.onmessage = (ev) => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    const o = d && d.o; if (!o) return;
+    const price = +o.ap || +o.p, qty = +o.q;
+    const liq = { side: o.S === 'SELL' ? 'long' : 'short', p: price, q: qty, usd: +(price * qty).toFixed(0), t: o.T || Date.now() };
+    const line = 'event: liq\ndata: ' + JSON.stringify(liq) + '\n\n';
+    for (const c of s.clients) { try { c.write(line); } catch {} }
+  };
+  lw.onclose = () => { if (OF_STREAMS.get(sym) === s && s.clients.size) setTimeout(() => { if (s.clients.size) { s.liqWs = null; ofLiqEnsure(sym, s); } }, 2000); };
+  lw.onerror = () => { try { lw.close(); } catch {} };
 }
 app.get('/api/orderflow-stream', (req, res) => {
   const sym = String(req.query.symbol || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -3832,7 +4139,7 @@ app.get('/api/orderflow-stream', (req, res) => {
     clearInterval(hb);
     s.clients.delete(res);
     // linger 30s so a page refresh reuses the upstream socket instead of churning it
-    setTimeout(() => { const cur = OF_STREAMS.get(sym); if (cur && !cur.clients.size && cur.ws) { try { cur.ws.close(); } catch {} OF_STREAMS.delete(sym); } }, 30000);
+    setTimeout(() => { const cur = OF_STREAMS.get(sym); if (cur && !cur.clients.size && cur.ws) { try { cur.ws.close(); } catch {} try { if (cur.liqWs) cur.liqWs.close(); } catch {} OF_STREAMS.delete(sym); } }, 30000);
   });
 });
 
@@ -3863,6 +4170,221 @@ app.get('/api/orderflow-klines', async (req, res) => {
 
 // ── Clean focused ORDERFLOW LIVE view: chart + live liquidity heatmap + CVD/delta/divergence ──
 app.get('/live', (req, res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate'); res.type('html').send(LIVE_HTML); });
+
+// ── Full in-app help / tutorial page ──
+const HELP_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeBobby — Guide</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root{--bg:#0a0c0f;--panel:#10141a;--border:#1e2630;--muted:#8593a3;--g:#28dc78;--r:#ff4646;--y:#ffc14d;--cy:#3fd0ff;--tx:#d7dee7}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex}
+  code,kbd,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  code{background:#161c24;border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:12px;color:#b7e5ff}
+  kbd{background:#1a222c;border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:1px 7px;font-size:12px;color:#fff}
+  nav{position:sticky;top:0;align-self:flex-start;height:100vh;overflow:auto;width:238px;flex:0 0 238px;background:var(--panel);border-right:1px solid var(--border);padding:16px 12px}
+  nav .brand{font-weight:800;letter-spacing:1px;color:var(--cy);font-size:16px;margin-bottom:2px}
+  nav .sub{color:var(--muted);font-size:11px;margin-bottom:14px}
+  nav a{display:block;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:5px;font-size:13px}
+  nav a:hover{background:#161c24;color:var(--tx)}
+  nav a.top{color:var(--cy);margin-top:10px;border:1px solid var(--border)}
+  main{flex:1 1 auto;max-width:900px;margin:0 auto;padding:34px 40px 120px}
+  h1{font-size:26px;margin:0 0 4px} .lead{color:var(--muted);margin:0 0 26px;font-size:15px}
+  section{scroll-margin-top:16px;padding:22px 0;border-top:1px solid var(--border)}
+  h2{font-size:19px;margin:0 0 12px;color:#fff;display:flex;align-items:center;gap:9px}
+  h2 .ic{font-size:20px}
+  h3{font-size:14px;margin:18px 0 6px;color:var(--cy);text-transform:uppercase;letter-spacing:.6px}
+  p{margin:8px 0}
+  ul,ol{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:12px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}nav{display:none}main{padding:20px}}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{text-align:left;padding:6px 9px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  td.mono{font-size:12px;white-space:nowrap}
+  .pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700}
+  .g{color:var(--g)}.r{color:var(--r)}.y{color:var(--y)}.cy{color:var(--cy)}.muted{color:var(--muted)}
+  .bg-g{background:rgba(40,220,120,.15);color:var(--g)}.bg-r{background:rgba(255,70,70,.15);color:var(--r)}.bg-y{background:rgba(255,193,77,.15);color:var(--y)}
+  .note{border-left:3px solid var(--cy);background:#0d1620;padding:9px 13px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+  .warn{border-left:3px solid var(--y);background:#1a1406;padding:9px 13px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+  a.inline{color:var(--cy)}
+  .kbmap{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+  .kbmap div{background:#0d1219;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px}
+</style></head><body>
+<nav>
+  <div class="brand">🐋 TradeBobby</div>
+  <div class="sub">Guide &amp; aide d'utilisation</div>
+  <a href="#what">1 · C'est quoi</a>
+  <a href="#app">2 · App bureau &amp; démarrage</a>
+  <a href="#tabs">3 · Onglets du dashboard</a>
+  <a href="#orderflow">4 · Page Orderflow /live</a>
+  <a href="#daemons">5 · Daemons &amp; sources</a>
+  <a href="#keys">6 · Raccourcis clavier</a>
+  <a href="#rules">7 · Règles &amp; style de trading</a>
+  <a href="#signals">8 · Lire les signaux</a>
+  <a href="#trouble">9 · Dépannage</a>
+  <a href="/" class="top">← Terminal</a>
+  <a href="/live" class="top">🌊 Orderflow live</a>
+</nav>
+<main>
+  <h1>TradeBobby — Guide complet</h1>
+  <p class="lead">Assistant de trading local : un terminal macro + un orderflow crypto temps réel, nourris par ~20 daemons qui agrègent des dizaines d'API gratuites. Tout tourne sur ta machine (localhost:3333), sans compte, sans cloud.</p>
+
+  <section id="what"><h2><span class="ic">🧭</span>1 · C'est quoi TradeBobby</h2>
+    <p>Deux vues principales :</p>
+    <ul>
+      <li><b>/ (Terminal)</b> — cockpit macro : scanner ICT/SMC forex/or/indices/actions, contexte macro (VIX, taux, DXY, secteurs), news géopolitiques, sentiment, calendrier éco, COT, flux ETF, brief IA.</li>
+      <li><b>/live (Orderflow)</b> — microstructure crypto temps réel : chart+CVD, funding/OI, long/short, liquidations, carnet d'ordres, tape des trades.</li>
+    </ul>
+    <div class="note">Philosophie : <b>survie du capital d'abord</b>. L'ICT/SMC sert à marquer la structure, pas comme edge prouvé. Le vrai edge est la couche risque (stops ATR, R:R, sizing). Crypto = <b>watch-only</b> (observation, pas de signaux de trade auto).</div>
+  </section>
+
+  <section id="app"><h2><span class="ic">🖥️</span>2 · App bureau &amp; démarrage d'une session</h2>
+    <h3>App macOS (un clic)</h3>
+    <ol>
+      <li>Ouvre <code>desktop/dist/TradeBobby-1.0.0-arm64.dmg</code>, glisse <b>TradeBobby</b> dans Applications.</li>
+      <li>1er lancement : clic droit → <b>Ouvrir</b> (app non signée).</li>
+      <li>Elle lance le dashboard + les daemons et ouvre la fenêtre. Icône dans la barre de menu : Start/Stop/Restart, statut <code>● N up</code>, Open Live.</li>
+      <li>Fermer la fenêtre = se cache dans le tray (les données continuent). « Stop all &amp; Quit » = arrêt complet.</li>
+    </ol>
+    <p class="muted">Astuce : Réglages → Éléments de connexion → ajoute TradeBobby pour un démarrage auto après chaque redémarrage.</p>
+    <h3>En ligne de commande</h3>
+    <table><tr><th>Commande</th><th>Effet</th></tr>
+      <tr><td class="mono">bash manage.sh start</td><td>Démarre dashboard + tous les daemons</td></tr>
+      <tr><td class="mono">bash manage.sh status</td><td>État de chaque process + santé</td></tr>
+      <tr><td class="mono">bash manage.sh restart</td><td>Tout redémarrer</td></tr>
+      <tr><td class="mono">bash manage.sh logs &lt;daemon&gt;</td><td>50 dernières lignes de log</td></tr>
+    </table>
+    <div class="note">Un <b>watchdog</b> tourne via cron toutes les 2 min : il relance tout daemon mort <i>ou figé</i> (sortie périmée), utile au réveil de la machine.</div>
+    <h3>Session TradingView (pour le scanner macro)</h3>
+    <ol>
+      <li>Lance <code>start-trading</code> dans un terminal (ouvre Chrome CDP port 9222).</li>
+      <li>Connecte-toi à TradingView, ouvre un chart, ajoute l'indicateur <b>Pro Trading V6</b>.</li>
+      <li>Dans Claude Code : <code>tv_health_check</code> pour vérifier la connexion.</li>
+    </ol>
+  </section>
+
+  <section id="tabs"><h2><span class="ic">📑</span>3 · Onglets du dashboard (/)</h2>
+    <table>
+      <tr><th>Onglet</th><th>Contenu</th><th>Source</th></tr>
+      <tr><td><b>Terminal</b></td><td>Vue d'ensemble : top signal, watchlist, killzones, brief du jour</td><td>scan + agents</td></tr>
+      <tr><td><b>Markets</b></td><td>Scanner V5 ICT/SMC : Struct, HTF, Zone, MTF, Conf, Signal pour 12 marchés</td><td>MCP TradingView</td></tr>
+      <tr><td><b>Intel</b></td><td>News géopolitiques/marché catégorisées + criticité</td><td>news-scanner (Google News RSS)</td></tr>
+      <tr><td><b>Macro</b></td><td>VIX &amp; structure de terme, courbe des taux, DXY, rotation sectorielle, crédit, or/argent</td><td>macro-pulse (Yahoo)</td></tr>
+      <tr><td><b>Notes</b></td><td>Feedback/idées/bugs + panneau DATA AGE (fraîcheur de chaque flux)</td><td>feedback.json</td></tr>
+    </table>
+    <div class="warn"><b>« MCP OFFLINE » / colonnes vides dans Markets ?</b> Le scanner lit l'indicateur Pine V6 sur ton chart TradingView. Si TradingView n'est pas ouvert/connecté, ou si l'indicateur n'est pas sur le chart, les données sont absentes (affichées « — », plus jamais « null »). Voir §9.</div>
+  </section>
+
+  <section id="orderflow"><h2><span class="ic">🌊</span>4 · Page Orderflow /live — chaque panneau</h2>
+    <p>Terminal microstructure crypto temps réel (données Binance spot+futures + Hyperliquid). 8 actifs : BTC, ETH, SOL, BNB, XRP, DOGE, ADA, AVAX.</p>
+    <div class="grid2">
+      <div class="card"><h3 style="margin-top:0">Bande watchlist (haut)</h3>Un chip par actif avec son <b>funding annualisé</b> en couleur. Clic ou touches <kbd>1</kbd>–<kbd>8</kbd> pour changer d'actif.</div>
+      <div class="card"><h3 style="margin-top:0">Dots de connexion</h3><span class="g">●</span> trades / liq / deriv = flux vivant, <span class="y">●</span> = attente, <span class="r">●</span> = coupé. Un flux mort se voit d'un coup d'œil.</div>
+      <div class="card"><h3 style="margin-top:0">Ruban dérivés</h3>Funding (/8h + /an), compte à rebours du prochain funding, Open Interest + Δ24h, <b>L/S retail</b> vs <b>L/S smart money</b>, taker buy%, écart de funding Binance↔Hyperliquid, biais net.</div>
+      <div class="card"><h3 style="margin-top:0">Chart + CVD</h3>Bougies + volume + sous-panneau <b>CVD</b> (delta cumulé taker achat−vente, le vrai flux agressif). Les gros trades (&ge;$25k) apparaissent comme marqueurs 🐋.</div>
+      <div class="card"><h3 style="margin-top:0">Gauge Long/Short + squeeze</h3>Arc SVG : % long vs short (retail). Alerte <span class="r">LONG SQUEEZE RISK</span> si funding élevé + longs surchargés, <span class="g">SHORT SQUEEZE</span> à l'inverse.</div>
+      <div class="card"><h3 style="margin-top:0">OBI sparkline</h3>Order-Book Imbalance dans le temps : &gt;0 = pression acheteuse au carnet, &lt;0 = vendeuse.</div>
+      <div class="card"><h3 style="margin-top:0">Liquidations</h3>Feed temps réel des liquidations forcées + barre long vs short (5 min). <span class="r">Long rekt</span> en cascade sous le prix = capitulation (fuel de rebond) ; <span class="g">short rekt</span> au-dessus = squeeze haussier.</div>
+      <div class="card"><h3 style="margin-top:0">Trades tape</h3>Time &amp; sales : chaque trade coloré par agresseur (vert=achat, rouge=vente), les gros en gras.</div>
+      <div class="card"><h3 style="margin-top:0">Heatmap liquidité</h3>Carnet d'ordres agrégé : murs bid/ask, mid, spread. Les grosses barres = gros ordres de repos.</div>
+      <div class="card"><h3 style="margin-top:0">Radar funding (bas)</h3>Le funding des 8 actifs en un coup d'œil, coloré par intensité. Clic = changer d'actif.</div>
+    </div>
+    <div class="note">Session Δ (header) = delta cumulé taker depuis l'ouverture de la page. 🐋 = compteur de gros trades achat/vente.</div>
+  </section>
+
+  <section id="daemons"><h2><span class="ic">⚙️</span>5 · Daemons &amp; sources de données</h2>
+    <p>Chaque daemon écrit un JSON lu par le dashboard. Cadences différentes selon la nature de la donnée.</p>
+    <table>
+      <tr><th>Daemon</th><th>Données</th><th>Source (API)</th><th>Cadence</th></tr>
+      <tr><td class="mono">macro-pulse</td><td>VIX, taux US, DXY, secteurs, or/argent, crédit</td><td>Yahoo Finance</td><td>5 min</td></tr>
+      <tr><td class="mono">macro-context</td><td>Synthèse régime macro</td><td>agrège les JSON</td><td>30 min</td></tr>
+      <tr><td class="mono">crypto-pulse</td><td>Fear &amp; Greed, dominance BTC, funding, OI</td><td>Alternative.me, CoinGecko</td><td>5 min</td></tr>
+      <tr><td class="mono">derivatives</td><td>Funding, OI, long/short, taker, cross-venue</td><td>Binance Futures + Hyperliquid</td><td>60 s</td></tr>
+      <tr><td class="mono">orderflow-crypto</td><td>CVD, OBI, régime, divergences</td><td>Binance</td><td>temps réel</td></tr>
+      <tr><td class="mono">news-scanner</td><td>News géopolitiques &amp; marché</td><td>Google News RSS</td><td>~15 min</td></tr>
+      <tr><td class="mono">cot-fetcher</td><td>Positionnement institutionnel (COT)</td><td>CFTC</td><td>hebdo</td></tr>
+      <tr><td class="mono">onchain-btc</td><td>Hashrate, difficulté, frais, blocs</td><td>blockchain.info / mempool</td><td>~1 h</td></tr>
+      <tr><td class="mono">etf-flows</td><td>Flux ETF BTC/actions</td><td>public</td><td>~2 h</td></tr>
+      <tr><td class="mono">currency-strength</td><td>Force relative des devises</td><td>dérivé Yahoo</td><td>30 min</td></tr>
+      <tr><td class="mono">reddit-mania</td><td>Attention retail (mentions tickers)</td><td>Reddit</td><td>~1 h</td></tr>
+      <tr><td class="mono">earnings-cal</td><td>Calendrier résultats</td><td>public</td><td>~12 h</td></tr>
+      <tr><td class="mono">econ-calendar</td><td>NFP, CPI, FOMC, ECB…</td><td>règles récurrentes</td><td>quotidien</td></tr>
+      <tr><td class="mono">setup-tracker / -alerter</td><td>Suivi + alertes des setups</td><td>scan</td><td>événementiel</td></tr>
+      <tr><td class="mono">trade-agent</td><td>Brief de trading</td><td>agrège + règles</td><td>quotidien</td></tr>
+      <tr><td class="mono">claude-narrator / tts-narrator</td><td>Narration IA (texte + voix)</td><td>Anthropic Claude</td><td>événementiel</td></tr>
+      <tr><td class="mono">auto-scan</td><td>Scan mécanique V5 (sans IA)</td><td>MCP TradingView</td><td>4 h</td></tr>
+      <tr><td class="mono">weekly-brief</td><td>Brief hebdo</td><td>agrège</td><td>hebdo</td></tr>
+    </table>
+    <p class="muted">Le panneau <b>DATA AGE</b> (onglet Notes) reflète ces cadences : COT/EARN à ~1 h, c'est normal ; CRYPTO à 1 min aussi. Un flux « stale » anormalement vieux = daemon figé (le watchdog le relance).</p>
+    <div class="note">Nouvelles API branchées cette version : <b>Binance Futures</b> (funding/OI/long-short/liquidations) et <b>Hyperliquid</b> (funding cross-venue), récupérées depuis tes projets TradingForge / WhalegodTG / RugscoreBotTG.</div>
+  </section>
+
+  <section id="keys"><h2><span class="ic">⌨️</span>6 · Raccourcis clavier</h2>
+    <h3>Page Orderflow /live</h3>
+    <div class="kbmap">
+      <div><kbd>1</kbd>…<kbd>8</kbd> sélectionner l'actif (BTC…AVAX)</div>
+      <div><kbd>[</kbd> / <kbd>]</kbd> changer de timeframe</div>
+    </div>
+    <h3>Terminal /</h3>
+    <div class="kbmap">
+      <div><kbd>1</kbd> Terminal</div><div><kbd>2</kbd> Markets</div><div><kbd>3</kbd> Intel</div><div><kbd>4</kbd> Macro</div><div><kbd>5</kbd> Notes</div>
+    </div>
+    <p class="muted">Clic droit sur un symbole de la heatmap = ajouter/retirer des favoris (watchlist).</p>
+  </section>
+
+  <section id="rules"><h2><span class="ic">📐</span>7 · Règles &amp; style de trading</h2>
+    <p>Approche <b>risk-first / survie du capital</b>. Marchés cœur : forex + or ; puis indices, actions US large-cap. Crypto = watch-only.</p>
+    <table>
+      <tr><th>Paramètre</th><th>Règle</th></tr>
+      <tr><td>Risque par trade</td><td>1 % (stop basé ATR)</td></tr>
+      <tr><td>R:R minimum</td><td>1:2</td></tr>
+      <tr><td>Positions</td><td>max 3 ouvertes · max 3 nouvelles/jour</td></tr>
+      <tr><td>Stop journalier</td><td>après −2 % ou 2 pertes consécutives</td></tr>
+      <tr><td>Break-even</td><td>ne jamais bouger le SL à BE avant +1R</td></tr>
+      <tr><td>Levier</td><td>FX ≤5:1 · or/indices ≤3:1 · actions US ≤2:1</td></tr>
+      <tr><td>Meilleure fenêtre</td><td>overlap Londres/NY 20:30–23:00 (UTC+7) · open cash US 20:30–22:00 pour les actions</td></tr>
+    </table>
+  </section>
+
+  <section id="signals"><h2><span class="ic">🔎</span>8 · Comment lire les signaux</h2>
+    <h3>Scanner ICT/SMC (Markets)</h3>
+    <ul>
+      <li><b>Struct</b> : BOS/CHoCH — BULL = HH/HL, BEAR = LH/LL.</li>
+      <li><b>HTF</b> : biais Daily (EMA 20/50/200).</li>
+      <li><b>Zone</b> : Premium (vendre) / Discount (acheter) ; OTE = 0.62–0.79.</li>
+      <li><b>MTF</b> : alignement Daily/4H/Current — <span class="g">↑↑↑</span> ou <span class="r">↓↓↓</span> = alignement fort.</li>
+      <li><b>Conf</b> : score de confluence (10 facteurs ICT). ≥6 = setup fort.</li>
+    </ul>
+    <h3>Orderflow crypto</h3>
+    <ul>
+      <li><b>Funding positif élevé</b> = longs paient = positionnement long surchargé → risque de <span class="r">long squeeze</span> (contrarian short).</li>
+      <li><b>Funding négatif</b> = shorts paient → risque de <span class="g">short squeeze</span>.</li>
+      <li><b>CVD qui monte + prix qui stagne</b> = absorption acheteuse (divergence haussière).</li>
+      <li><b>L/S retail vs smart money</b> divergents = souvent le smart money a raison.</li>
+      <li><b>Cascade de liquidations long</b> sous le prix = capitulation → fuel de rebond.</li>
+      <li><b>OBI</b> fortement positif = mur d'achats au carnet (support).</li>
+    </ul>
+    <div class="warn">Ce sont des <b>lentilles de confluence</b>, pas des signaux d'entrée automatiques. Backtest avant de trader.</div>
+  </section>
+
+  <section id="trouble"><h2><span class="ic">🛠️</span>9 · Dépannage</h2>
+    <table>
+      <tr><th>Symptôme</th><th>Cause &amp; solution</th></tr>
+      <tr><td>« MCP OFFLINE », Markets vide / « — »</td><td>TradingView pas ouvert/connecté, ou l'indicateur Pro Trading V6 absent du chart. Ouvre TradingView (<code>start-trading</code>), ajoute l'indicateur, puis <code>tv_health_check</code>. Le scanner se remplit au prochain <code>auto-scan</code>.</td></tr>
+      <tr><td>Indicateur V6 en erreur <span class="mono">RE10140</span></td><td>Le script dépassait 64 plots. Corrigé dans le <code>.pine</code> (≈59 plots) — recharge-le dans l'éditeur Pine et « Add to chart ».</td></tr>
+      <tr><td>Tout est « down » au retour</td><td>La machine a dormi (macOS tue les process). Le watchdog relance tout sous ~2 min ; sinon <code>bash manage.sh start</code>.</td></tr>
+      <tr><td>Un daemon vivant mais données figées</td><td>Le watchdog détecte les sorties périmées et le relance automatiquement.</td></tr>
+      <tr><td>Heatmap orderflow lente/vide</td><td>Le carnet Binance met ~5–6 s depuis cette région ; un cache serveur (3 s) + dédup lissent ça. Se recharge tout seul.</td></tr>
+      <tr><td>Reddit « all fetches failed »</td><td>Reddit bloque l'accès script par IP. Dégrade proprement (garde la donnée précédente) ; fiabilité = OAuth.</td></tr>
+    </table>
+    <p class="muted" style="margin-top:20px">Localhost uniquement, sans authentification — ne pas exposer sur Internet en l'état.</p>
+  </section>
+</main>
+</body></html>`;
+app.get('/help', (req, res) => { res.type('html').send(HELP_HTML); });
+app.get('/tutorial', (req, res) => res.redirect('/help'));
 
 // Handle malformed JSON gracefully (error-handling middleware must come AFTER routes)
 app.use((err, req, res, next) => {

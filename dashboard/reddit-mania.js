@@ -39,24 +39,34 @@ const STOP_TICKERS = new Set([
 const TICKER_RE = /\$?\b[A-Z]{2,5}\b/g;
 const CRYPTO_RE = /\$?\b(BTC|ETH|SOL|XRP|DOGE|ADA|MATIC|LINK|AVAX|DOT|SUI|TON|ATOM|UNI|FIL|NEAR|APT|TIA)\b/g;
 
+// Reddit 403s any UA that looks like a bot/script. A realistic desktop-browser UA + browser-y
+// Accept headers is best-effort. NOTE: Reddit now IP-blocks datacenter/script access to the
+// public .json endpoints regardless of UA -- if 403s persist, reliable access needs OAuth
+// (REDDIT_CLIENT_ID/SECRET, script app). The daemon degrades gracefully (keeps prior data),
+// so this stays best-effort rather than pulling in the OAuth dependency. Two host fallbacks.
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const REDDIT_HOSTS = ['https://old.reddit.com', 'https://www.reddit.com'];
+
 async function fetchSub(sub, limit) {
-  // old.reddit.com is far less aggressive about blocking script user agents than www.
-  const url = `https://old.reddit.com/r/${sub}/new.json?limit=${limit}`;
-  try {
-    const r = await fetch(url, {
-      headers: { 'User-Agent': 'tradebobby/1.0 (macOS; monitoring script)' },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!r.ok) {
-      log(`  ⚠ r/${sub} HTTP ${r.status}`);
-      return [];
+  for (const host of REDDIT_HOSTS) {
+    const url = `${host}/r/${sub}/new.json?limit=${limit}&raw_json=1`;
+    try {
+      const r = await fetch(url, {
+        headers: {
+          'User-Agent': BROWSER_UA,
+          'Accept': 'application/json,text/html;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!r.ok) { log(`  ⚠ r/${sub} HTTP ${r.status} (${host.replace('https://','')})`); continue; }
+      const j = await r.json();
+      return (j?.data?.children || []).map(c => c.data);
+    } catch (e) {
+      log(`  ⚠ r/${sub} fetch error: ${e.message} (${host.replace('https://','')})`);
     }
-    const j = await r.json();
-    return (j?.data?.children || []).map(c => c.data);
-  } catch (e) {
-    log(`  ⚠ r/${sub} fetch error: ${e.message}`);
-    return [];
   }
+  return [];
 }
 
 function extractTickers(text) {

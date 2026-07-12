@@ -5,7 +5,7 @@
 
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkLogger, writeJsonAtomic } from './_log-helper.js';
+import { mkLogger, writeJsonAtomic, readJsonSafe } from './_log-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'crypto_pulse.json');
@@ -94,29 +94,41 @@ async function run() {
     fearGreed(), btcDominance(), fundingRates(), btcOpenInterest()
   ]);
 
+  // Last-known-good merge: a single flaky cycle used to overwrite all four fields with
+  // null (on 2026-07-12 one failed fetch wiped a good F&G 26 / dom 56.25% to nulls).
+  // Carry forward the previous value for any source that failed this cycle, marked stale.
+  const prev = readJsonSafe(OUT) || {};
+  const staleFields = [];
+  const carry = (val, key) => {
+    if (val != null) return val;
+    if (prev[key] != null) { staleFields.push(key); return prev[key]; }
+    return null;
+  };
   const out = {
     timestamp: new Date().toISOString(),
-    fear_greed: fg,
-    dominance: dom,
-    funding: fund,
-    open_interest_btc: oi
+    fear_greed: carry(fg, 'fear_greed'),
+    dominance: carry(dom, 'dominance'),
+    funding: carry(fund, 'funding'),
+    open_interest_btc: carry(oi, 'open_interest_btc')
   };
+  if (staleFields.length) out.stale_fields = staleFields;
 
-  // Regime classification
+  // Regime classification -- use the MERGED value so a carried-over F&G still drives regime.
+  const fgm = out.fear_greed;
   let regime = 'NEUTRAL', signal = '';
-  if (fg) {
-    if (fg.current <= 20) { regime = 'EXTREME-FEAR'; signal = 'Contrarian LONG zone (historical bottom)'; }
-    else if (fg.current <= 35) { regime = 'FEAR'; signal = 'Accumulation zone'; }
-    else if (fg.current <= 50) { regime = 'NEUTRAL'; signal = 'No edge'; }
-    else if (fg.current <= 65) { regime = 'GREED'; signal = 'Reduce risk'; }
-    else if (fg.current <= 80) { regime = 'GREED-HIGH'; signal = 'Take profit'; }
+  if (fgm) {
+    if (fgm.current <= 20) { regime = 'EXTREME-FEAR'; signal = 'Contrarian LONG zone (historical bottom)'; }
+    else if (fgm.current <= 35) { regime = 'FEAR'; signal = 'Accumulation zone'; }
+    else if (fgm.current <= 50) { regime = 'NEUTRAL'; signal = 'No edge'; }
+    else if (fgm.current <= 65) { regime = 'GREED'; signal = 'Reduce risk'; }
+    else if (fgm.current <= 80) { regime = 'GREED-HIGH'; signal = 'Take profit'; }
     else { regime = 'EXTREME-GREED'; signal = 'Contrarian SHORT zone (historical top)'; }
   }
   out.regime = regime;
   out.signal = signal;
 
   // Funding signal
-  const btcF = fund?.tracked?.BTCUSDT?.funding_pct;
+  const btcF = out.funding?.tracked?.BTCUSDT?.funding_pct;
   if (btcF !== undefined) {
     if (btcF > 0.05) out.funding_signal = 'BTC longs paying — bullish positioning crowded (squeeze SHORT risk)';
     else if (btcF < -0.02) out.funding_signal = 'BTC shorts paying — bearish positioning crowded (squeeze LONG risk)';
@@ -124,7 +136,8 @@ async function run() {
   }
 
   writeJsonAtomic(OUT, out);
-  log(`✅ F&G ${fg?.current||'—'} (${fg?.classification||''}) · BTC dom ${dom?.btc_dominance||'—'}% · regime ${regime}`);
+  const staleTag = staleFields.length ? ` · stale:${staleFields.join(',')}` : '';
+  log(`✅ F&G ${fgm?.current||'—'} (${fgm?.classification||''}) · BTC dom ${out.dominance?.btc_dominance||'—'}% · regime ${regime}${staleTag}`);
   return out;
 }
 

@@ -11,4 +11,6 @@
 
 PATH=/Users/neo/.nvm/versions/node/v22.22.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
-*/5 * * * * cd /Users/neo/Documents/VsCodeN30/GIT_PUBLIC_SoCloseSociety/TradeBobby/dashboard && /bin/bash watchdog.sh >> watchdog.log 2>&1
+# Every 2 min: after the machine wakes from sleep (which kills the daemons), this restarts
+# them within ~2 min instead of 5. Each run is a sub-second pgrep+stat sweep, so it's cheap.
+*/2 * * * * cd /Users/neo/Documents/VsCodeN30/GIT_PUBLIC_SoCloseSociety/TradeBobby/dashboard && /bin/bash watchdog.sh >> watchdog.log 2>&1

@@ -13,6 +13,16 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
+# Resolve node's PATH. When launched from the Finder/Electron app (or cron), the process
+# inherits a minimal PATH WITHOUT node, so every `node …` below would fail silently and no
+# daemon would start. Prepend the nvm/homebrew locations if node isn't already found.
+if ! command -v node >/dev/null 2>&1; then
+  for cand in "$HOME"/.nvm/versions/node/*/bin /opt/homebrew/bin /usr/local/bin; do
+    [ -x "$cand/node" ] && PATH="$cand:$PATH" && break
+  done
+fi
+export PATH
+
 # Load local secrets (gitignored .env) so daemons inherit API keys
 # (ANTHROPIC_API_KEY for claude-narrator, TELEGRAM_*/DISCORD_* for alerts, etc.).
 if [ -f "$SCRIPT_DIR/.env" ]; then set -a; . "$SCRIPT_DIR/.env"; set +a; fi
@@ -21,6 +31,7 @@ DAEMONS=(
   "macro-pulse"
   "macro-context"
   "crypto-pulse"
+  "derivatives"
   "orderflow-crypto"
   "news-scanner"
   "cot-fetcher"
@@ -112,9 +123,11 @@ case "$CMD" in
       if [ "$TARGET" = "dashboard" ]; then stop_dashboard; sleep 1; start_dashboard
       else stop_daemon "$TARGET"; sleep 1; start_daemon "$TARGET"; fi
     else
-      "$0" stop
+      # Re-invoke via bash+absolute path: bare "$0" ("manage.sh") isn't on PATH so it
+      # failed with "command not found" when called as `bash manage.sh restart`.
+      bash "$SCRIPT_DIR/manage.sh" stop
       sleep 2
-      "$0" start
+      bash "$SCRIPT_DIR/manage.sh" start
     fi
     ;;
 
